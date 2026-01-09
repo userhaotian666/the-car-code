@@ -1,98 +1,118 @@
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
+from fastapi import APIRouter, Depends, HTTPException,status
+from sqlalchemy.orm import Session,joinedload
+from typing import Optional, List
+from sqlalchemy import select
+
+from schemas import DeviceBase, DeviceCreate, DeviceRead, DeviceUpdate
 from database import get_db  # 导入公共的 get_db
-from model import DeviceDB    # 导入模型
-from pydantic import BaseModel, Field
-
-# --- Pydantic 模型 (前端数据校验) ---
-class DeviceModel(BaseModel):
-    name: str
-    # 这里用 bool，前端传 true/false，数据库自动存 1/0
-    device_status: bool = False 
-    sensor_status: bool = False
-    
-    battery: int = Field(default=100, ge=0, le=100)
-    
-    ip_address: str = "192.168.1.1"
-
-class CommandModel(BaseModel):
-    action: str
+from model import Device,Car  # 导入模型
 
 router = APIRouter(prefix="/devices", tags=["Devices"])
 
-# --- 接口 1 : 获取所有设备 ---
-@router.get("/")
-def get_all_devices(db: Session = Depends(get_db)):
-    devices = db.query(DeviceDB).all()
-    return devices
+# 1. 创建设备 (Create)
+@router.post("/devices/", response_model=DeviceRead, status_code=status.HTTP_201_CREATED)
+def create_device(device: DeviceCreate, db: Session = Depends(get_db)):
+    # 将 Pydantic 模型转换为 SQLAlchemy 模型
+    db_device = Device(**device.model_dump())
+    db.add(db_device)
+    db.commit()
+    db.refresh(db_device) # 刷新以获取自动生成的 ID 和 created_at
+    return db_device
 
-# --- 接口 2 : 获取指定ID设备 ---
-@router.get("/{device_id}")
-def get_device(device_id: int, db: Session = Depends(get_db)):
-    device = db.query(DeviceDB).filter(DeviceDB.id == device_id).first()
-    if not device:
+# 2. 查询设备列表 (Read List)
+@router.get("/devices/", response_model=List[DeviceRead])
+def read_devices(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
+    # SQLAlchemy 2.0 推荐写法: select(Model)
+    stmt = select(Device).offset(skip).limit(limit)
+    result = db.execute(stmt)
+    # scalars().all() 将结果转换为模型对象列表
+    return result.scalars().all()
+
+# 3. 查询单个设备 (Read One)
+@router.get("/devices/{device_id}", response_model=DeviceRead)
+def read_device(device_id: int, db: Session = Depends(get_db)):
+    device = db.get(Device, device_id)
+    if device is None:
         raise HTTPException(status_code=404, detail="Device not found")
     return device
 
-# --- 接口 3 : 创建设备 ---
-@router.post("/")
-def create_device(device: DeviceModel, db: Session = Depends(get_db)):
-    new_device = DeviceDB(
-        name=device.name,
-        # Pydantic 的 True/False 会在这里自动转换
-        device_status=device.device_status, 
-        sensor_status=device.sensor_status,
-        battery=device.battery,
-        ip_address=device.ip_address
-    )
-    db.add(new_device)
-    db.commit()
-    db.refresh(new_device)
-    return new_device
-
-# --- 接口 4 : 修改设备名 ---
-class DeviceRename(BaseModel):
-    new_name: str
-
-@router.post("/{device_id}/rename")
-def rename_device(device_id: int, request_name: DeviceRename, db: Session = Depends(get_db)):
-    device = db.query(DeviceDB).filter(DeviceDB.id == device_id).first()
-    if not device:
+# 4. 更新设备 (Update)
+@router.patch("/devices/{device_id}", response_model=DeviceRead)
+def update_device(device_id: int, device_update: DeviceUpdate, db: Session = Depends(get_db)):
+    # 查找现有设备
+    db_device = db.get(Device, device_id)
+    if db_device is None:
         raise HTTPException(status_code=404, detail="Device not found")
     
-    device.name = request_name.new_name
-    db.commit()
-    db.refresh(device)
-    return {"message": f"Device {device_id} renamed successfully"}
-
-# --- 接口 5 : 修改电量 ---
-class BatteryUpdate(BaseModel):
-    new_battery: int
-
-@router.post("/{device_id}/battery")
-def update_battery(device_id: int, battery_update: BatteryUpdate, db: Session = Depends(get_db)):
-    device = db.query(DeviceDB).filter(DeviceDB.id == device_id).first()
-    if not device:
-        raise HTTPException(status_code=404, detail="Device not found")
+    # 提取需要更新的数据 (exclude_unset=True 确保只更新用户传来的字段)
+    update_data = device_update.model_dump(exclude_unset=True)
     
-    if battery_update.new_battery < 0 or battery_update.new_battery > 100:
-        raise HTTPException(status_code=400, detail="Battery must be between 0 and 100")
+    # 遍历并更新属性
+    for key, value in update_data.items():
+        setattr(db_device, key, value)
     
-    device.battery = battery_update.new_battery
+    # 手动更新 updated_at (有些数据库配置可能需要手动触发)
+    # db_device.updated_at = datetime.now() 
+    
     db.commit()
-    db.refresh(device)
-    return {"message": f"Device {device_id} battery updated into {device.battery} %"}
+    db.refresh(db_device)
+    return db_device
 
-# --- 接口 6 : 删除指定设备 ---
-@router.delete("/{device_id}")
+# 5. 删除设备 (Delete)
+@router.delete("/devices/{device_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_device(device_id: int, db: Session = Depends(get_db)):
-    #先去数据库里查，看看这个设备存不存在
-    device = db.query(DeviceDB).filter(DeviceDB.id == device_id).first()
+    db_device = db.get(Device, device_id)
+    if db_device is None:
+        raise HTTPException(status_code=404, detail="Device not found")
     
+    db.delete(db_device)
+    db.commit()
+    return None
+
+#6. 设备绑定车
+@router.post("/{car_id}/bind_device/{device_id}")
+def bind_device_to_car(car_id: int, device_id: int, db: Session = Depends(get_db)):
+    # 第一步：查出车
+    car = db.get(Car, car_id)
+    if not car:
+        raise HTTPException(status_code=404, detail="Car not found")
+        
+    # 第二步：查出设备
+    device = db.get(Device, device_id)
     if not device:
         raise HTTPException(status_code=404, detail="Device not found")
     
-    # 找到了，告诉数据库要删除这个对象
-    db.delete(device)  
+    # 第三步：检查是否已经绑定了 (防止重复绑定)
+    if device in car.devices:
+        return {"message": "Device already bound to this car", "success": False}
+    
+    # 第四步：建立关系 (SQLAlchemy 会自动处理中间表)
+    # 你不需要手动去 insert car_device_relations 表，直接 append 即可
+    car.devices.append(device)
+    
     db.commit()
-    return {"message": f"Device {device_id} deleted successfully"}
+    return {"message": f"Device {device.name} bound to Car {car.name}", "success": True}
+
+#7. 设备从车上解绑
+@router.delete("/{car_id}/unbind_device/{device_id}")
+def unbind_device_from_car(car_id: int, device_id: int, db: Session = Depends(get_db)):
+    # 查车（注意：需要加载 devices，否则 remove 时可能会报错或需要触发懒加载）
+    # 这里为了稳妥，显式加载 devices
+    stmt = select(Car).options(joinedload(Car.devices)).where(Car.id == car_id)
+    car = db.execute(stmt).scalars().first()
+    
+    if not car:
+        raise HTTPException(status_code=404, detail="Car not found")
+    
+    # 在 car.devices 列表中查找这个设备
+    # 注意：这里不能简单用 id 判断，要在列表里找到对应的 ORM 对象
+    target_device = next((d for d in car.devices if d.id == device_id), None)
+    
+    if not target_device:
+        raise HTTPException(status_code=404, detail="Device is not bound to this car")
+    
+    # 移除关系
+    car.devices.remove(target_device)
+    
+    db.commit()
+    return {"message": "Device unbound successfully", "success": True}

@@ -1,8 +1,8 @@
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine,select
 from sqlalchemy.orm import sessionmaker, DeclarativeBase
 
-SQLALCHEMY_DATABASE_URL = "mysql+pymysql://root:Cqc114514!@192.168.31.64/car_db"
-#SQLALCHEMY_DATABASE_URL = "mysql+pymysql://root:xhtxht0715@localhost/robot_control_db"
+#SQLALCHEMY_DATABASE_URL = "mysql+pymysql://root:Cqc114514!@192.168.31.64/Car_data"
+SQLALCHEMY_DATABASE_URL = "mysql+pymysql://root:xhtxht0715@localhost/robot_car_system"
 engine = create_engine(SQLALCHEMY_DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
