@@ -6,10 +6,15 @@ from datetime import datetime
 # 导入摘要模型
 from .common import DeviceSummary
 
+# 小车状态 (沿用你提供的定义)
+CAR_FAULT = 0       # 故障
+CAR_STANDBY = 1     # 待机
+CAR_RUNNING = 2     # 运行中
+
 # --- 基础字段 ---
 class CarBase(BaseModel):
     name: str
-    status: int = 0  # 0-空闲
+    status: int = 1  # 1-空闲
     
 # --- 1. 创建模型 ---
 class CarCreate(CarBase):

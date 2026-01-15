@@ -10,7 +10,7 @@ from model import Device,Car  # 导入模型
 router = APIRouter(prefix="/devices", tags=["Devices"])
 
 # 1. 创建设备 (Create)
-@router.post("/devices/", response_model=DeviceRead, status_code=status.HTTP_201_CREATED)
+@router.post("/", response_model=DeviceRead, status_code=status.HTTP_201_CREATED,summary="创建设备")
 def create_device(device: DeviceCreate, db: Session = Depends(get_db)):
     # 将 Pydantic 模型转换为 SQLAlchemy 模型
     db_device = Device(**device.model_dump())
@@ -20,7 +20,7 @@ def create_device(device: DeviceCreate, db: Session = Depends(get_db)):
     return db_device
 
 # 2. 查询设备列表 (Read List)
-@router.get("/devices/", response_model=List[DeviceRead])
+@router.get("/", response_model=List[DeviceRead],summary="查询设备列表")
 def read_devices(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
     # SQLAlchemy 2.0 推荐写法: select(Model)
     stmt = select(Device).offset(skip).limit(limit)
@@ -29,7 +29,7 @@ def read_devices(skip: int = 0, limit: int = 100, db: Session = Depends(get_db))
     return result.scalars().all()
 
 # 3. 查询单个设备 (Read One)
-@router.get("/devices/{device_id}", response_model=DeviceRead)
+@router.get("/{device_id}", response_model=DeviceRead,summary="查询单个设备")
 def read_device(device_id: int, db: Session = Depends(get_db)):
     device = db.get(Device, device_id)
     if device is None:
@@ -37,7 +37,7 @@ def read_device(device_id: int, db: Session = Depends(get_db)):
     return device
 
 # 4. 更新设备 (Update)
-@router.patch("/devices/{device_id}", response_model=DeviceRead)
+@router.patch("/{device_id}", response_model=DeviceRead,summary="更新设备")
 def update_device(device_id: int, device_update: DeviceUpdate, db: Session = Depends(get_db)):
     # 查找现有设备
     db_device = db.get(Device, device_id)
@@ -59,7 +59,7 @@ def update_device(device_id: int, device_update: DeviceUpdate, db: Session = Dep
     return db_device
 
 # 5. 删除设备 (Delete)
-@router.delete("/devices/{device_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/{device_id}", status_code=status.HTTP_204_NO_CONTENT,summary="删除设备")
 def delete_device(device_id: int, db: Session = Depends(get_db)):
     db_device = db.get(Device, device_id)
     if db_device is None:
@@ -70,7 +70,7 @@ def delete_device(device_id: int, db: Session = Depends(get_db)):
     return None
 
 #6. 设备绑定车
-@router.post("/{car_id}/bind_device/{device_id}")
+@router.post("/{car_id}/bind_device/{device_id}",summary="设备绑定车")
 def bind_device_to_car(car_id: int, device_id: int, db: Session = Depends(get_db)):
     # 第一步：查出车
     car = db.get(Car, car_id)
@@ -94,7 +94,7 @@ def bind_device_to_car(car_id: int, device_id: int, db: Session = Depends(get_db
     return {"message": f"Device {device.name} bound to Car {car.name}", "success": True}
 
 #7. 设备从车上解绑
-@router.delete("/{car_id}/unbind_device/{device_id}")
+@router.delete("/{car_id}/unbind_device/{device_id}",summary="设备从车上解绑")
 def unbind_device_from_car(car_id: int, device_id: int, db: Session = Depends(get_db)):
     # 查车（注意：需要加载 devices，否则 remove 时可能会报错或需要触发懒加载）
     # 这里为了稳妥，显式加载 devices

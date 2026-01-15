@@ -13,7 +13,7 @@ router = APIRouter(prefix="/cars", tags=["Cars"])
 # ==========================================
 # 1. 创建小车 (Create)
 # ==========================================
-@router.post("/", response_model=CarRead, status_code=status.HTTP_201_CREATED)
+@router.post("/", response_model=CarRead, status_code=status.HTTP_201_CREATED,summary="创建设备")
 def create_car(car: CarCreate, db: Session = Depends(get_db)):
     # 1. 转换模型
     db_car = Car(**car.model_dump())
@@ -29,7 +29,7 @@ def create_car(car: CarCreate, db: Session = Depends(get_db)):
 # ==========================================
 # 2. 查询小车列表 (Read List) - 带设备信息
 # ==========================================
-@router.get("/", response_model=List[CarRead])
+@router.get("/", response_model=List[CarRead],summary="查询小车列表")
 def read_cars(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
     # 【重点】：使用 options(selectinload(Car.devices))
     # 这告诉数据库：查 Car 的时候，把关联的 devices 也查出来放入内存
@@ -45,7 +45,7 @@ def read_cars(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
 # ==========================================
 # 3. 查询单个小车 (Read One) - 带设备信息
 # ==========================================
-@router.get("/{car_id}", response_model=CarRead)
+@router.get("/{car_id}", response_model=CarRead,summary="查询单个小车列表")
 def read_car(car_id: int, db: Session = Depends(get_db)):
     # 不能直接用 db.get(Car, car_id)，因为我们需要预加载 devices
     stmt = (
@@ -63,7 +63,7 @@ def read_car(car_id: int, db: Session = Depends(get_db)):
 # ==========================================
 # 4. 更新小车 (Update)
 # ==========================================
-@router.patch("/{car_id}", response_model=CarRead)
+@router.patch("/{car_id}", response_model=CarRead,summary="更新小车信息")
 def update_car(car_id: int, car_update: CarUpdate, db: Session = Depends(get_db)):
     # 1. 先查找（带上 devices，因为返回模型 CarRead 需要显示它们）
     stmt = select(Car).options(selectinload(Car.devices)).where(Car.id == car_id)
@@ -87,7 +87,7 @@ def update_car(car_id: int, car_update: CarUpdate, db: Session = Depends(get_db)
 # ==========================================
 # 5. 删除小车 (Delete)
 # ==========================================
-@router.delete("/{car_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/{car_id}", status_code=status.HTTP_204_NO_CONTENT,summary="删除小车")
 def delete_car(car_id: int, db: Session = Depends(get_db)):
     # 删除不需要加载 devices，直接查 ID 即可
     db_car = db.get(Car, car_id)
@@ -101,7 +101,7 @@ def delete_car(car_id: int, db: Session = Depends(get_db)):
 # ==========================================
 # 6. 小车绑定设备 (复用你的逻辑，只是反过来了)
 # ==========================================
-@router.post("/{car_id}/bind_device/{device_id}")
+@router.post("/{car_id}/bind_device/{device_id}",summary="小车绑定设备")
 def bind_device_to_car(car_id: int, device_id: int, db: Session = Depends(get_db)):
     # 1. 查车 (需要加载 devices 以便判断是否已存在)
     stmt = select(Car).options(selectinload(Car.devices)).where(Car.id == car_id)
@@ -128,7 +128,7 @@ def bind_device_to_car(car_id: int, device_id: int, db: Session = Depends(get_db
 # ==========================================
 # 7. 小车解绑设备
 # ==========================================
-@router.delete("/{car_id}/unbind_device/{device_id}")
+@router.delete("/{car_id}/unbind_device/{device_id}",summary="小车解绑设备")
 def unbind_device_from_car(car_id: int, device_id: int, db: Session = Depends(get_db)):
     # 1. 查车 (一定要加载 devices)
     stmt = select(Car).options(selectinload(Car.devices)).where(Car.id == car_id)

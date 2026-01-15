@@ -1,21 +1,28 @@
 from datetime import datetime
-from typing import Optional, List
-from sqlalchemy import create_engine, String, Integer, SmallInteger, DateTime, ForeignKey, JSON, DECIMAL, BigInteger, text
+from typing import Optional, List,TYPE_CHECKING
+from sqlalchemy import create_engine, String, Integer, SmallInteger, DateTime, ForeignKey, JSON, DECIMAL, BigInteger, text,Float, Index
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from database import Base  # 假设你的 Base 已经是 DeclarativeBase
 
+if TYPE_CHECKING:
+    pass
 # ================= 1. 地图表 (Map) [cite: 15, 16] =================
 class Map(Base):
     __tablename__ = "maps"
     
-    id: Mapped[int] = mapped_column(primary_key=True, comment="ID")
-    name: Mapped[str] = mapped_column(String(100), nullable=False, comment="名字")
-    path: Mapped[Optional[str]] = mapped_column(String(255), comment="路径文件地址")
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, comment="创建时间")
+    id: Mapped[int] = mapped_column(primary_key=True, comment="区域ID")
+    name: Mapped[str] = mapped_column(String(100), nullable=False, comment="区域名称")
+    # 纬度 (如 39.90923)
+    center_lat: Mapped[float] = mapped_column(Float, nullable=False, comment="中心点纬度") 
+    # 经度 (如 116.397428)
+    center_lng: Mapped[float] = mapped_column(Float, nullable=False, comment="中心点经度")
+    # 缩放级别 (默认16，既能看清路也能看清楼)
+    zoom: Mapped[int] = mapped_column(Integer, default=16, comment="默认缩放级别")
 
-    # 反向关系：一个地图可以被多个任务使用
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
+    # 关系不用变
     tasks: Mapped[List["Task"]] = relationship(back_populates="map_info")
-
+    
 # ================= 2. 路径表 (Path) [cite: 9, 10] =================
 class Path(Base):
     __tablename__ = "paths"
@@ -31,42 +38,53 @@ class Task(Base):
     
     id: Mapped[int] = mapped_column(primary_key=True, comment="任务id")
     name: Mapped[str] = mapped_column(String(100), comment="名字")
-    status: Mapped[int] = mapped_column(SmallInteger, default=0, comment="状态:0未开始,1进行中,2已完成,3异常")
+    status: Mapped[int] = mapped_column(SmallInteger, default=0, comment="状态")
     
-    # 外键关联
-    map_id: Mapped[Optional[int]] = mapped_column(ForeignKey("maps.id"), comment="关联map表")
-    path_id: Mapped[Optional[int]] = mapped_column(ForeignKey("paths.id"), comment="关联path表")
+    map_id: Mapped[Optional[int]] = mapped_column(ForeignKey("maps.id"))
+    path_id: Mapped[Optional[int]] = mapped_column(ForeignKey("paths.id"))
     
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
     finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
-    # ORM 关系
+    # 关系定义
     map_info: Mapped["Map"] = relationship(back_populates="tasks")
     path_info: Mapped["Path"] = relationship()
     problems: Mapped[List["Problem"]] = relationship(back_populates="task")
+
+    # 【新增关键代码】
+    # 1. Mapped["Car"]：加引号，告诉 Python 这是一个“稍后解析”的类型
+    # 2. relationship("Car", ...)：加引号，告诉 SQLAlchemy 去找名为 "Car" 的表映射
+    # 3. uselist=False：表示这是一对一关系（一个任务当前只能被一个车执行）
+    executor: Mapped[Optional["Car"]] = relationship(
+        "Car", 
+        back_populates="current_task",
+        uselist=False 
+    )
 
 # ================= 4. 小车表 (Car) [cite: 1, 2] =================
 class Car(Base):
     __tablename__ = "cars"
     
     id: Mapped[int] = mapped_column(primary_key=True, comment="小车ID")
-    name: Mapped[str] = mapped_column(String(50), nullable=False, comment="小车名字")
+    name: Mapped[str] = mapped_column(String(50), nullable=False)
     
-    # 关联当前正在执行的任务 (使用字符串 'Task' 避免循环导入问题)
-    current_task_id: Mapped[Optional[int]] = mapped_column(ForeignKey("tasks.id"), comment="当前任务ID")
-    
-    status: Mapped[int] = mapped_column(SmallInteger, default=0, comment="小车状态:0-空闲,1-任务中...")
+    current_task_id: Mapped[Optional[int]] = mapped_column(ForeignKey("tasks.id"))
+    status: Mapped[int] = mapped_column(SmallInteger, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
 
-    # ORM 高级查询关系
-    current_task: Mapped["Task"] = relationship()
+    # 【修改关键代码】
+    # 1. relationship("Task", ...)：使用字符串 "Task" 指向任务表
+    # 2. back_populates="executor"：这里的字符串必须对应 Task 类里的属性名 "executor"
+    current_task: Mapped["Task"] = relationship(
+        "Task", 
+        back_populates="executor"
+    )
     
-    # 多对多关系：通过中间表直接获取设备列表 (car.devices)
     devices: Mapped[List["Device"]] = relationship(
+        "Device", # 建议这里也都改成字符串 "Device" 保持风格统一
         secondary="car_device_relations",
         back_populates="cars"
     )
-
 # ================= 5. 设备表 (Device) [cite: 5, 6] =================
 class Device(Base):
     __tablename__ = "devices"
@@ -135,3 +153,11 @@ class CarHistory(Base):
     car_status: Mapped[int] = mapped_column(SmallInteger, comment="小车状态")
     # 毫秒级时间戳
     reported_at: Mapped[datetime] = mapped_column(DateTime(timezone=False), nullable=False, comment="上报时间")
+
+    __table_args__ = (
+        # 创建一个名为 idx_car_time 的复合索引
+        # 索引顺序：先按 car_id 分组，再按 reported_at 排序
+        Index("idx_car_time", "car_id", "reported_at"),
+    )
+
+
