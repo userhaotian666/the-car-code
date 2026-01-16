@@ -66,8 +66,8 @@ def assign_car_to_task(task_id: int, car_id: int, db: Session = Depends(get_db))
         raise HTTPException(status_code=404, detail="Task not found")
     
     # 校验：必须先绑定路径才能派车
-    if not task.path_id:
-        raise HTTPException(status_code=400, detail="Task must have a path bound first")
+    #if not task.path_id:
+        #raise HTTPException(status_code=400, detail="Task must have a path bound first")
 
     # 2. 获取车辆
     car = db.get(Car, car_id)
@@ -150,7 +150,7 @@ def pause_task(task_id: int, db: Session = Depends(get_db)):
         "car_status": task.executor.status if task.executor else None
     }
 
-# 完成任务或结束任务
+# 6. 完成任务或结束任务
 @router.post("/{task_id}/finish", summary="完成任务")
 def finish_task(task_id: int, db: Session = Depends(get_db)):
     task = db.get(Task, task_id)
@@ -171,7 +171,7 @@ def finish_task(task_id: int, db: Session = Depends(get_db)):
     db.commit()
     return {"message": "Task finished", "success": True}
 
-# ================= 6. 查询任务列表 (Read List) =================
+# ================= 7. 查询任务列表 (Read List) =================
 # 支持分页，支持按状态筛选
 @router.get("/", response_model=List[TaskRead], summary="获取所有任务列表")
 def read_tasks(
@@ -200,8 +200,7 @@ def read_tasks(
     result = db.execute(stmt)
     return result.scalars().all()
 
-
-# ================= 7. 查询单个任务详情 (Read One) =================
+# ================= 8. 查询单个任务详情 (Read One) =================
 @router.get("/{task_id}", response_model=TaskRead, summary="获取指定任务详情")
 def read_task(task_id: int, db: Session = Depends(get_db)):
     # 1. 使用 select + joinedload 查询，确保关联数据也能查出来
@@ -217,3 +216,37 @@ def read_task(task_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Task not found")
         
     return task
+
+
+# ================= 8. 删除任务 (Delete Task) =================
+# 该接口会安全地删除任务：
+# 1. 如果有车正在跑这个任务，会将车停下（状态变待机）并解绑。
+# 2. 任务记录被删除。
+# 3. 路径记录不受影响（保留在 paths 表中）。
+@router.delete("/{task_id}", status_code=status.HTTP_204_NO_CONTENT, summary="删除任务(自动释放车辆)")
+def delete_task(task_id: int, db: Session = Depends(get_db)):
+    # 1. 查找任务
+    task = db.get(Task, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    
+    # 2. 处理车辆关联 (核心需求：状态变为空闲，解绑)
+    car = task.executor
+    if car:
+        # 将车辆状态强制改为待机 (STATUS_STANDBY = 1)
+        # 即使任务是暂停或运行中，任务没了，车就应该闲置
+        car.status = CAR_STANDBY
+        
+        # 解除绑定关系
+        # SQLAlchemy 会自动将 cars 表里的 current_task_id 置为 NULL
+        car.current_task_id = None
+
+    # 3. 处理路径关联
+    # 任务被删除后，Task 表里的 path_id 自然消失。
+    # Path 表里的记录依然存在 ("path可以保留")，符合需求。
+    
+    # 4. 执行删除
+    db.delete(task)
+    db.commit()
+    
+    return None

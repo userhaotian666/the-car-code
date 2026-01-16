@@ -27,3 +27,12 @@ def create_map(map_in: MapCreate, db: Session = Depends(get_db)):
 @router.get("/", response_model=list[MapOut])
 def get_maps(db: Session = Depends(get_db)):
     return db.query(Map).all()
+
+@router.delete("/{map_id}", status_code=204, summary="删除一个区域")
+def delete_map(map_id: int, db: Session = Depends(get_db)):
+    map_obj = db.get(Map, map_id)
+    if map_obj:
+        db.delete(map_obj)
+        db.commit()
+    return None
+
