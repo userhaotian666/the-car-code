@@ -206,7 +206,8 @@ def read_task(task_id: int, db: Session = Depends(get_db)):
     # 1. 使用 select + joinedload 查询，确保关联数据也能查出来
     stmt = select(Task).options(
         joinedload(Task.path_info),
-        joinedload(Task.executor)
+        joinedload(Task.executor),
+        joinedload(Task.problems)
     ).where(Task.id == task_id)
     
     result = db.execute(stmt)

@@ -42,3 +42,10 @@ class CarSimple(BaseModel):
     class Config:
         from_attributes = True
 
+class ProblemSimple(BaseModel):
+    id: int
+    description: str
+    name: str
+
+    class Config:
+        from_attributes = True

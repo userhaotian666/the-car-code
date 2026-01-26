@@ -1,7 +1,7 @@
 from pydantic import BaseModel
 from typing import Optional, List
 from datetime import datetime
-from .common import PathSimple, CarSimple
+from .common import PathSimple, CarSimple,ProblemSimple
 # 基础模型
 class TaskBase(BaseModel):
     name: str
@@ -22,7 +22,8 @@ class TaskRead(BaseModel):
     # 关键：嵌套显示对象，而不是只显示 path_id
     # 如果没绑定，则是 None
     path_info: Optional[PathSimple] = None 
-    executor: Optional[CarSimple] = None   
+    executor: Optional[CarSimple] = None
+    problems: Optional[List["ProblemSimple"]] = None   
     
     created_at: datetime
     finished_at: Optional[datetime]

@@ -148,3 +148,14 @@ def unbind_device_from_car(car_id: int, device_id: int, db: Session = Depends(ge
     db.commit()
     
     return {"message": "Device unbound successfully", "success": True}
+
+# ==========================================
+# 8. 获取小车状态
+# ==========================================
+@router.get("/{car_id}/status",  summary="获取车辆状态")
+def get_car_status(car_id: int, db: Session = Depends(get_db)):
+    db_car = db.get(Car, car_id)
+    if not db_car:
+        raise HTTPException(status_code=404, detail="Car not found")
+    
+    return {"status": db_car.status}        

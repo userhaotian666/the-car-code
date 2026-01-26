@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from database import engine, Base
-from routers import devices,car,map,mission,history,path,task
+from routers import devices,car,map,mission,history,path,task,problem
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 import os
@@ -30,7 +30,7 @@ app.include_router(mission.router)
 app.include_router(history.router)
 app.include_router(path.router)
 app.include_router(task.router)
-
+app.include_router(problem.router)
 @app.get("/")
 def root():
     return {"message": "Server is running!"}

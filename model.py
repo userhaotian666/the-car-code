@@ -124,6 +124,9 @@ class Problem(Base):
     
     task: Mapped["Task"] = relationship(back_populates="problems")
 
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, onupdate=datetime.now)
+
 # ================= 8. 命令表 (Command) [cite: 13, 14] =================
 class Command(Base):
     __tablename__ = "commands"
@@ -141,23 +144,30 @@ class Command(Base):
 class CarHistory(Base):
     __tablename__ = "car_history"
     
-    # 数据量大，使用 BigInteger
+    # ... 原有字段 ...
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     car_id: Mapped[int] = mapped_column(ForeignKey("cars.id", ondelete="CASCADE"))
     
     battery: Mapped[int] = mapped_column(SmallInteger, comment="电池信息")
-    # 经纬度必须用 DECIMAL 保证精度
+    
+    # --- 新增字段 ---
+    # 假设温度保留一位小数，使用 Float 即可，若需高精度可用 DECIMAL
+    temperature: Mapped[float] = mapped_column(Float, comment="温度(℃)")
+    
+    # 速度
+    speed: Mapped[float] = mapped_column(Float, comment="速度(m/s)")
+    
+    # 信号强度通常为整数 (例如 RSSI -100 到 0, 或 0-100 百分比)
+    signal: Mapped[int] = mapped_column(SmallInteger, comment="信号强度")
+    # ----------------
+    
     longitude: Mapped[float] = mapped_column(DECIMAL(10, 7), comment="经度")
     latitude: Mapped[float] = mapped_column(DECIMAL(10, 7), comment="纬度")
     
     car_status: Mapped[int] = mapped_column(SmallInteger, comment="小车状态")
-    # 毫秒级时间戳
     reported_at: Mapped[datetime] = mapped_column(DateTime(timezone=False), nullable=False, comment="上报时间")
 
     __table_args__ = (
-        # 创建一个名为 idx_car_time 的复合索引
-        # 索引顺序：先按 car_id 分组，再按 reported_at 排序
         Index("idx_car_time", "car_id", "reported_at"),
     )
-
 

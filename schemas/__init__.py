@@ -9,3 +9,4 @@ from .mission import Waypoint,MissionCreateRequest
 from .history import CarRealtimeResponse
 from .path import PathCreate, PathRead, Waypoint as PathWaypoint, PathUpdate
 from .task import TaskCreate, TaskRead, TaskBase
+from .problem import ProblemCreate, ProblemResponse, ProblemUpdate

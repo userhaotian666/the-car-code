@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>车辆实时轨迹监控 (自动更新版)</title>
+    <title>车辆实时轨迹监控 (带状态显示)</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     
     <style>
@@ -17,21 +17,21 @@
             padding: 15px; z-index: 1000;
             border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.3);
             min-width: 220px;
+            line-height: 1.8; /* 稍微增加行高 */
         }
         .status-badge {
             padding: 5px 10px; border-radius: 4px; color: white; font-weight: bold;
-            display: inline-block; margin-bottom: 10px;
+            display: inline-block; margin-bottom: 10px; width: 100%; box-sizing: border-box; text-align: center;
         }
-        .connected { background-color: #28a745; } /* 绿色 */
-        .disconnected { background-color: #dc3545; } /* 红色 */
+        .connected { background-color: #28a745; } /* 网络连接-绿 */
+        .disconnected { background-color: #dc3545; } /* 网络断开-红 */
 
         /* 明显的小车图标 */
         .car-dot {
             width: 16px; height: 16px;
-            background-color: #ff0000; /* 红色车身 */
+            background-color: #ff0000; 
             border: 3px solid white;
             border-radius: 50%;
-            /* 强烈的呼吸动画 */
             box-shadow: 0 0 0 0 rgba(255, 0, 0, 0.7);
             animation: pulse-red 1.5s infinite;
         }
@@ -45,11 +45,12 @@
 <body>
 
     <div id="info-panel">
-        <div id="status-badge" class="status-badge disconnected">等待连接...</div>
+        <div id="ws-status-badge" class="status-badge disconnected">等待连接...</div>
         <div>车辆ID: <b id="car-id">--</b></div>
-        <div>电量: <b id="battery">--</b>%</div>
-        <div>坐标: <span id="coords" style="font-family: monospace;">--</span></div>
-        <div style="margin-top:10px; font-size:12px; color:#666;">
+        <div>运行状态: <b id="car-status">--</b></div>
+        <div>剩余电量: <b id="battery">--</b>%</div>
+        <div>当前坐标: <span id="coords" style="font-family: monospace; font-size: 0.9em;">--</span></div>
+        <div style="margin-top:10px; font-size:12px; color:#666; border-top: 1px solid #eee; padding-top:5px;">
             * 地图将自动跟随车辆移动
         </div>
     </div>
@@ -60,19 +61,24 @@
     <script>
         // ================= 配置 =================
         const CONFIG = {
-            carId: 3,                 // 监控 ID=3 的车
-            wsUrl: 'ws://127.0.0.1:8000/history/3/monitor',
-            maxPoints: 500            // 只保留最近500个点
+            carId: 11,
+            wsUrl: 'ws://127.0.0.1:8000/history/11/monitor',
+            maxPoints: 500
+        };
+
+        // 新增：状态映射配置
+        const STATUS_MAP = {
+            0: { text: "⚠️ 故障 (FAULT)", color: "#dc3545" },   // 红色
+            1: { text: "⏳ 待机 (STANDBY)", color: "#6c757d" }, // 灰色
+            2: { text: "🚀 运行中 (RUNNING)", color: "#007bff" } // 蓝色
         };
         // =======================================
 
-        // 1. 初始化地图 (18级是大比例尺，看街道更清楚)
         const map = L.map('map').setView([31.2304, 121.4737], 18);
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
             attribution: '© OpenStreetMap'
         }).addTo(map);
 
-        // 变量
         let ws = null;
         let carMarker = null;
         let pathLine = null;
@@ -85,73 +91,83 @@
             iconAnchor: [11, 11]
         });
 
-        // UI 元素
+        // UI 元素引用
         const dom = {
-            status: document.getElementById('status-badge'),
+            wsStatus: document.getElementById('ws-status-badge'),
             id: document.getElementById('car-id'),
             battery: document.getElementById('battery'),
-            coords: document.getElementById('coords')
+            coords: document.getElementById('coords'),
+            carStatus: document.getElementById('car-status') // 新增
         };
 
         function connect() {
             ws = new WebSocket(CONFIG.wsUrl);
 
             ws.onopen = () => {
-                dom.status.textContent = "🟢 实时数据接收中";
-                dom.status.className = "status-badge connected";
+                dom.wsStatus.textContent = "🟢 网络已连接";
+                dom.wsStatus.className = "status-badge connected";
                 dom.id.textContent = CONFIG.carId;
                 console.log("WebSocket 已连接");
             };
 
             ws.onmessage = (event) => {
-                // 不需要刷新页面，这里收到消息会自动触发！
-                const data = JSON.parse(event.data);
-                updateMap(data);
+                try {
+                    const data = JSON.parse(event.data);
+                    updateMap(data);
+                } catch (e) {
+                    console.error("数据解析错误:", e);
+                }
             };
 
             ws.onclose = () => {
-                dom.status.textContent = "🔴 连接断开 (3秒后重连)";
-                dom.status.className = "status-badge disconnected";
+                dom.wsStatus.textContent = "🔴 网络断开 (3秒后重连)";
+                dom.wsStatus.className = "status-badge disconnected";
                 setTimeout(connect, 3000);
             };
         }
 
         function updateMap(data) {
-            // 1. 更新面板文字
+            // 1. 更新基础文本
             dom.battery.textContent = data.battery;
             dom.coords.textContent = `${data.latitude.toFixed(5)}, ${data.longitude.toFixed(5)}`;
 
-            const point = [data.latitude, data.longitude];
+            // 2. 【新增】更新车辆状态显示
+            // 假设后端传回来的字段名为 'car_status' (如果是其他名字，请修改 data.car_status)
+            if (data.car_status !== undefined && STATUS_MAP[data.car_status]) {
+                const s = STATUS_MAP[data.car_status];
+                dom.carStatus.textContent = s.text;
+                dom.carStatus.style.color = s.color;
+            } else {
+                dom.carStatus.textContent = "未知状态";
+                dom.carStatus.style.color = "black";
+            }
 
-            // 2. 存点
+            // 3. 地图绘制逻辑
+            const point = [data.latitude, data.longitude];
+            
             pathPoints.push(point);
             if (pathPoints.length > CONFIG.maxPoints) pathPoints.shift();
 
-            // 3. 画明显的红线 (关键修改)
             if (!pathLine) {
                 pathLine = L.polyline(pathPoints, {
-                    color: 'red',      // 【改】鲜艳的红色
-                    weight: 6,         // 【改】线条加粗
-                    opacity: 0.9,      // 【改】不透明
-                    lineJoin: 'round'  // 转角圆滑
+                    color: 'red',
+                    weight: 6,
+                    opacity: 0.9,
+                    lineJoin: 'round'
                 }).addTo(map);
             } else {
                 pathLine.setLatLngs(pathPoints);
             }
 
-            // 4. 更新小车位置
             if (!carMarker) {
                 carMarker = L.marker(point, {icon: carIcon}).addTo(map);
             } else {
                 carMarker.setLatLng(point);
             }
 
-            // 5. 【关键】自动让地图中心跟随小车！
-            // 这样你就不用手动拖动地图，也不用刷新页面找车了
             map.panTo(point);
         }
 
-        // 启动
         connect();
     </script>
 </body>
