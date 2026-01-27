@@ -1,15 +1,20 @@
-from fastapi import APIRouter, Depends
-from sqlalchemy.orm import Session
+from fastapi import APIRouter, Depends, status
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 from database import get_db
 from model import Map
-from schemas import MapCreate, MapOut # 导入刚才改好的schema
+from schemas import MapCreate, MapOut
+from typing import List
 
 router = APIRouter(prefix="/maps", tags=["Maps"])
 
-@router.post("/", response_model=MapOut, summary="创建一个新区域")
-def create_map(map_in: MapCreate, db: Session = Depends(get_db)):
+# ==========================================
+# 1. 创建地图 (Create)
+# ==========================================
+@router.post("/", response_model=MapOut, status_code=status.HTTP_201_CREATED, summary="创建一个新区域")
+async def create_map(map_in: MapCreate, db: AsyncSession = Depends(get_db)):
     """
-    不再需要 UploadFile,直接接收 JSON 数据
+    异步创建地图：不再需要 UploadFile，直接处理 JSON 数据。
     """
     new_map = Map(
         name=map_in.name,
@@ -19,20 +24,33 @@ def create_map(map_in: MapCreate, db: Session = Depends(get_db)):
     )
     
     db.add(new_map)
-    db.commit()
-    db.refresh(new_map)
+    await db.commit()    # 👈 必须 await
+    await db.refresh(new_map) # 👈 必须 await
     
     return new_map
 
-@router.get("/", response_model=list[MapOut])
-def get_maps(db: Session = Depends(get_db)):
-    return db.query(Map).all()
+# ==========================================
+# 2. 查询地图列表 (Read List)
+# ==========================================
+@router.get("/", response_model=List[MapOut], summary="查询所有地图")
+async def get_maps(db: AsyncSession = Depends(get_db)):
+    # SQLAlchemy 2.0 异步写法：使用 select 对象
+    stmt = select(Map).order_by(Map.created_at.desc())
+    result = await db.execute(stmt) # 👈 必须 await
+    
+    # scalars().all() 将结果集转换为模型对象列表
+    return result.scalars().all()
 
-@router.delete("/{map_id}", status_code=204, summary="删除一个区域")
-def delete_map(map_id: int, db: Session = Depends(get_db)):
-    map_obj = db.get(Map, map_id)
+# ==========================================
+# 3. 删除地图 (Delete)
+# ==========================================
+@router.delete("/{map_id}", status_code=status.HTTP_204_NO_CONTENT, summary="删除一个区域")
+async def delete_map(map_id: int, db: AsyncSession = Depends(get_db)):
+    # 异步获取单个对象
+    map_obj = await db.get(Map, map_id) # 👈 必须 await
+    
     if map_obj:
-        db.delete(map_obj)
-        db.commit()
+        await db.delete(map_obj) # 👈 建议 await
+        await db.commit()        # 👈 必须 await
+        
     return None
-

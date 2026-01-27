@@ -1,8 +1,8 @@
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
-from sqlalchemy.orm import Session
-from database import SessionLocal  # 👈 【关键】请引入你自己定义的 SessionLocal
-from CRUD import get_latest_car_status_sync # 假设你的查询函数在这里
-from schemas import CarRealtimeResponse # 假设你的模型在这里
+from sqlalchemy.ext.asyncio import AsyncSession
+from database import AsyncSessionLocal  # 👈 确保这是你定义的异步 Session 工厂
+from CRUD import get_latest_car_status_async  # 👈 使用我们之前改好的异步查询函数
+from schemas import CarRealtimeResponse
 import asyncio
 from fastapi.encoders import jsonable_encoder
 
@@ -12,26 +12,21 @@ router = APIRouter(prefix="/history", tags=["history"])
 async def websocket_car_monitor(
     websocket: WebSocket, 
     car_id: int
-    # ❌ 删除这里的 db: Session = Depends(get_db)
-    # 这一行导致连接一直被占用不释放
 ):
-    print(f"🔌 [连接请求] 正在连接车辆: {car_id}")
+    print(f"🔌 [连接请求] 正在异步监控车辆: {car_id}")
     await websocket.accept()
     
     last_reported_time = None
     
     try:
         while True:
-            # ✅ 【核心修改】每次循环使用 with 语句创建新的临时会话
-            # 这里的 SessionLocal() 会从连接池借一个连接，
-            # with 代码块结束时，会自动 close() 并归还连接。
-            with SessionLocal() as db:
+            # ✅ 【核心修改 1】使用 async with 开启异步会话
+            # 这样每次循环都会从异步连接池借出一个连接，结束后自动归还
+            async with AsyncSessionLocal() as db:
                 
-                # 1. 查询数据
                 try:
-                    # 注意：因为每次都是新的 Session，所以不需要 db.commit() 来刷新数据了
-                    # 新 Session 默认就能看到数据库里的最新状态。
-                    car_data = get_latest_car_status_sync(db, car_id)
+                    # ✅ 【核心修改 2】必须 await 异步查询函数
+                    car_data = await get_latest_car_status_async(db, car_id)
                 except Exception as e:
                     print(f"❌ [DB错误] {e}")
                     await asyncio.sleep(1) 
@@ -40,20 +35,25 @@ async def websocket_car_monitor(
                 if car_data:
                     # 2. 判断数据是否更新
                     if last_reported_time != car_data.reported_at:
+                        # 验证并转换模型
                         data_model = CarRealtimeResponse.model_validate(car_data)
                         data_json = jsonable_encoder(data_model)
                         
+                        # 发送数据到前端
                         await websocket.send_json(data_json)
-                        # print(f"📤 [推送] 数据已发送: {data_json['reported_at']}")
                         
+                        # 更新最后一次记录的时间戳
                         last_reported_time = car_data.reported_at
             
-            # 3. 频率控制 (让出 CPU 并防止频繁查询)
+            # 3. 频率控制 (让出事件循环，防止死循环卡死服务器)
+            # 建议根据你传感器上报的频率调整，比如 0.5 秒或 1 秒
             await asyncio.sleep(1)
             
     except WebSocketDisconnect:
-        print(f"👋 客户端断开")
+        print(f"👋 客户端 {car_id} 已断开连接")
     except Exception as e:
-        print(f"❌ 异常: {e}")
-        # 这里不需要 db.close()，因为 with 语句已经自动处理了
-        await websocket.close()
+        print(f"❌ WebSocket 异常: {e}")
+        try:
+            await websocket.close()
+        except:
+            pass

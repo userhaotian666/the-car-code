@@ -1,161 +1,161 @@
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.orm import Session, selectinload
-from typing import List, Optional
+from sqlalchemy.ext.asyncio import AsyncSession  # 1. 改变 Session 类型
+from sqlalchemy.orm import selectinload
+from typing import List
 from sqlalchemy import select
 
 # 导入你的 schema 和 model
-from schemas import CarBase, CarCreate, CarRead, CarUpdate
+from schemas import CarCreate, CarRead, CarUpdate
 from database import get_db
-from model import Car, Device  # 假设你的模型都在 models.py
-
+from model import Car, Device ,CarHistory
+from CRUD import get_latest_car_status_async  # 导入异步查询函数
 router = APIRouter(prefix="/cars", tags=["Cars"])
 
 # ==========================================
-# 1. 创建小车 (Create)
+# 1. 创建小车 (Create) - 异步版
 # ==========================================
-@router.post("/", response_model=CarRead, status_code=status.HTTP_201_CREATED,summary="创建设备")
-def create_car(car: CarCreate, db: Session = Depends(get_db)):
-    # 1. 转换模型
+@router.post("/", response_model=CarRead, status_code=status.HTTP_201_CREATED)
+async def create_car(car: CarCreate, db: AsyncSession = Depends(get_db)): # async def
     db_car = Car(**car.model_dump())
     
-    # 2. 存入数据库
     db.add(db_car)
-    db.commit()
-    db.refresh(db_car)
-    
-    # 注意：新创建的车 devices 列表为空，Pydantic 会自动处理为空列表
+    await db.commit()   # 2. 加上 await
+    await db.refresh(db_car) # 3. 加上 await
     return db_car
 
 # ==========================================
-# 2. 查询小车列表 (Read List) - 带设备信息
+# 2. 查询小车列表 (Read List)
 # ==========================================
-@router.get("/", response_model=List[CarRead],summary="查询小车列表")
-def read_cars(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
-    # 【重点】：使用 options(selectinload(Car.devices))
-    # 这告诉数据库：查 Car 的时候，把关联的 devices 也查出来放入内存
+@router.get("/", response_model=List[CarRead])
+async def read_cars(skip: int = 0, limit: int = 100, db: AsyncSession = Depends(get_db)):
     stmt = (
         select(Car)
         .options(selectinload(Car.devices)) 
         .offset(skip)
         .limit(limit)
     )
-    result = db.execute(stmt)
+    # 4. 执行查询需要 await
+    result = await db.execute(stmt)
     return result.scalars().all()
 
 # ==========================================
-# 3. 查询单个小车 (Read One) - 带设备信息
+# 3. 查询单个小车 (Read One)
 # ==========================================
-@router.get("/{car_id}", response_model=CarRead,summary="查询单个小车列表")
-def read_car(car_id: int, db: Session = Depends(get_db)):
-    # 不能直接用 db.get(Car, car_id)，因为我们需要预加载 devices
+@router.get("/{car_id}", response_model=CarRead)
+async def read_car(car_id: int, db: AsyncSession = Depends(get_db)):
     stmt = (
         select(Car)
         .options(selectinload(Car.devices))
         .where(Car.id == car_id)
     )
-    result = db.execute(stmt)
+    result = await db.execute(stmt)
     car = result.scalars().first()
     
     if car is None:
         raise HTTPException(status_code=404, detail="Car not found")
     return car
 
+@router.get("/{car_id}/status", response_model=CarRead)
+async def read_car_status(car_id: int, db: AsyncSession = Depends(get_db)):
+    # 1. 异步查询基础车辆信息
+    # 使用 selectinload 预加载关联的 devices，防止异步环境下的懒加载报错
+    stmt = (
+        select(Car)
+        .options(selectinload(Car.devices))
+        .where(Car.id == car_id)
+    )
+    result = await db.execute(stmt)
+    car = result.scalars().first()
+    
+    if car is None:
+        raise HTTPException(status_code=404, detail="Car not found")
+    
+    # 2. 调用你之前改好的异步查询函数，获取最新的历史状态
+    # 这里的 db 会话是共享的，完全没问题
+    latest_history = await get_latest_car_status_async(db, car_id)
+    
+    if latest_history:
+        # 注意：这里是将历史表的数据临时“挂载”到小车对象上返回给前端
+        # 确保你的 CarRead Schema 中定义了 status 和 last_update 字段
+        car.status = latest_history.car_status  # 对应你模型里的字段名
+    
+    return car
 # ==========================================
 # 4. 更新小车 (Update)
 # ==========================================
-@router.patch("/{car_id}", response_model=CarRead,summary="更新小车信息")
-def update_car(car_id: int, car_update: CarUpdate, db: Session = Depends(get_db)):
-    # 1. 先查找（带上 devices，因为返回模型 CarRead 需要显示它们）
+@router.patch("/{car_id}", response_model=CarRead)
+async def update_car(car_id: int, car_update: CarUpdate, db: AsyncSession = Depends(get_db)):
     stmt = select(Car).options(selectinload(Car.devices)).where(Car.id == car_id)
-    db_car = db.execute(stmt).scalars().first()
+    result = await db.execute(stmt)
+    db_car = result.scalars().first()
     
     if db_car is None:
         raise HTTPException(status_code=404, detail="Car not found")
     
-    # 2. 提取更新数据
     update_data = car_update.model_dump(exclude_unset=True)
-    
-    # 3. 更新字段
     for key, value in update_data.items():
         setattr(db_car, key, value)
     
-    # 4. 提交
-    db.commit()
-    db.refresh(db_car) # 刷新数据
+    await db.commit() # await
+    await db.refresh(db_car) # await
     return db_car
 
 # ==========================================
 # 5. 删除小车 (Delete)
 # ==========================================
-@router.delete("/{car_id}", status_code=status.HTTP_204_NO_CONTENT,summary="删除小车")
-def delete_car(car_id: int, db: Session = Depends(get_db)):
-    # 删除不需要加载 devices，直接查 ID 即可
-    db_car = db.get(Car, car_id)
+@router.delete("/{car_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_car(car_id: int, db: AsyncSession = Depends(get_db)):
+    # 5. 异步下 db.get 也要 await
+    db_car = await db.get(Car, car_id)
     if db_car is None:
         raise HTTPException(status_code=404, detail="Car not found")
     
-    db.delete(db_car)
-    db.commit()
+    await db.delete(db_car) # 建议也加上 await，虽然 delete 有时在 commit 时执行，但 db.delete 本身在 AsyncSession 中是异步的
+    await db.commit()
     return None
 
 # ==========================================
-# 6. 小车绑定设备 (复用你的逻辑，只是反过来了)
+# 6. 小车绑定设备
 # ==========================================
-@router.post("/{car_id}/bind_device/{device_id}",summary="小车绑定设备")
-def bind_device_to_car(car_id: int, device_id: int, db: Session = Depends(get_db)):
-    # 1. 查车 (需要加载 devices 以便判断是否已存在)
+@router.post("/{car_id}/bind_device/{device_id}")
+async def bind_device_to_car(car_id: int, device_id: int, db: AsyncSession = Depends(get_db)):
     stmt = select(Car).options(selectinload(Car.devices)).where(Car.id == car_id)
-    car = db.execute(stmt).scalars().first()
+    result = await db.execute(stmt)
+    car = result.scalars().first()
+    
     if not car:
         raise HTTPException(status_code=404, detail="Car not found")
 
-    # 2. 查设备
-    device = db.get(Device, device_id)
+    device = await db.get(Device, device_id) # await
     if not device:
         raise HTTPException(status_code=404, detail="Device not found")
     
-    # 3. 判重
-    # 注意：因为上面用了 selectinload，car.devices 是可用的
     if device in car.devices:
-         return {"message": "Device already bound to this car", "success": False}
+         return {"message": "Device already bound", "success": False}
     
-    # 4. 绑定
     car.devices.append(device)
-    db.commit()
+    await db.commit() # await
     
-    return {"message": f"Device {device.name} bound to Car {car.name}", "success": True}
+    return {"message": "Success", "success": True}
 
-# ==========================================
-# 7. 小车解绑设备
-# ==========================================
-@router.delete("/{car_id}/unbind_device/{device_id}",summary="小车解绑设备")
-def unbind_device_from_car(car_id: int, device_id: int, db: Session = Depends(get_db)):
-    # 1. 查车 (一定要加载 devices)
+@router.delete("/{car_id}/unbind_device/{device_id}")
+async def unbind_device_from_car(car_id: int, device_id: int, db: AsyncSession = Depends(get_db)):
     stmt = select(Car).options(selectinload(Car.devices)).where(Car.id == car_id)
-    car = db.execute(stmt).scalars().first()
+    result = await db.execute(stmt)
+    car = result.scalars().first()
     
     if not car:
         raise HTTPException(status_code=404, detail="Car not found")
-    
-    # 2. 在列表中找到对应的设备对象
-    target_device = next((d for d in car.devices if d.id == device_id), None)
-    
-    if not target_device:
-        raise HTTPException(status_code=404, detail="Device is not bound to this car")
-    
-    # 3. 移除
-    car.devices.remove(target_device)
-    db.commit()
-    
-    return {"message": "Device unbound successfully", "success": True}
 
-# ==========================================
-# 8. 获取小车状态
-# ==========================================
-@router.get("/{car_id}/status",  summary="获取车辆状态")
-def get_car_status(car_id: int, db: Session = Depends(get_db)):
-    db_car = db.get(Car, car_id)
-    if not db_car:
-        raise HTTPException(status_code=404, detail="Car not found")
+    device = await db.get(Device, device_id) # await
+    if not device:
+        raise HTTPException(status_code=404, detail="Device not found")
     
-    return {"status": db_car.status}        
+    if device not in car.devices:
+         return {"message": "Device not bound", "success": False}
+    
+    car.devices.remove(device)
+    await db.commit() # await
+    
+    return {"message": "Success", "success": True}
+

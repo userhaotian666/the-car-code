@@ -28,13 +28,20 @@ class CarUpdate(BaseModel):
     status: Optional[int] = None
     current_task_id: Optional[int] = None
 
-# --- 3. 读取/响应模型 ---
 class CarRead(CarBase):
     id: int
     created_at: datetime
     
+    # 使用 Optional 是因为有些新车可能还没有历史状态数据
+    status: Optional[int] = None
+    
+    # 如果你也想在状态接口返回位置和电量，可以继续添加：
+    # battery: Optional[int] = None
+    # longitude: Optional[float] = None
+    # latitude: Optional[float] = None
+
     # 【重点】嵌套显示设备列表
-    # 这里的 DeviceSummary 来自 common.py
     devices: List[DeviceSummary] = []
 
+    # Pydantic V2 的标准写法，确保能兼容 SQLAlchemy 的异步 ORM 对象
     model_config = ConfigDict(from_attributes=True)

@@ -1,1 +1,1 @@
-from .history import get_latest_car_status_sync
+from .history import get_latest_car_status_async
