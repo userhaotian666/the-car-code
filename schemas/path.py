@@ -4,8 +4,8 @@ from typing import List, Dict, Any, Optional
 # 1. 定义单个坐标点的模型
 # 前端传过来的点通常包含经纬度 (lat, lng) 或者 x, y
 class Waypoint(BaseModel):
-    lat: float = Field(..., description="经度 (Longitude) 或 X坐标")
-    lng: float = Field(..., description="纬度 (Latitude) 或 Y坐标")
+    x:float = Field(..., description="经度 (Longitude) 或 X坐标")
+    y: float = Field(..., description="纬度 (Latitude) 或 Y坐标")
 
  
 

@@ -77,7 +77,14 @@ async def read_car_status(car_id: int, db: AsyncSession = Depends(get_db)):
     if latest_history:
         # 注意：这里是将历史表的数据临时“挂载”到小车对象上返回给前端
         # 确保你的 CarRead Schema 中定义了 status 和 last_update 字段
-        car.status = latest_history.car_status  # 对应你模型里的字段名
+        
+        # 加上 is not None 的判断，明确排除 None 的情况，完美解决 Pylance 报错
+        if latest_history.car_status is not None:
+            car.status = latest_history.car_status
+        else:
+            # 可选：如果历史记录里的状态碰巧是 None，你可以让它保持小车原本的状态，或者给个默认值比如 0
+            pass 
+            # car.status = 0
     
     return car
 # ==========================================
