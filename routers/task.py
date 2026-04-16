@@ -8,6 +8,7 @@ from datetime import datetime,time
 from database import get_db
 from model import Task, Path, Car,TaskStatus
 from schemas import TaskCreate, TaskRead
+from MQTT import publish_path_to_car
 
 router = APIRouter(prefix="/tasks", tags=["Tasks"])
 
@@ -15,6 +16,101 @@ router = APIRouter(prefix="/tasks", tags=["Tasks"])
 CAR_FAULT = 0
 CAR_STANDBY = 1
 CAR_RUNNING = 2
+
+
+async def _get_task_with_relations(db: AsyncSession, task_id: int) -> Optional[Task]:
+    stmt = (
+        select(Task)
+        .options(
+            selectinload(Task.path_info),
+            selectinload(Task.executor),
+        )
+        .where(Task.id == task_id)
+    )
+    result = await db.execute(stmt)
+    return result.scalars().first()
+
+
+def _normalize_waypoints(raw_waypoints) -> List[dict]:
+    if not isinstance(raw_waypoints, list) or not raw_waypoints:
+        raise ValueError("路径为空，未下发 MQTT")
+
+    normalized_waypoints = []
+    for index, point in enumerate(raw_waypoints, start=1):
+        if not isinstance(point, dict):
+            raise ValueError(f"路径点 #{index} 格式不正确，未下发 MQTT")
+
+        x = point.get("x")
+        y = point.get("y")
+        if x is None or y is None:
+            raise ValueError(f"路径点 #{index} 缺少 x/y，未下发 MQTT")
+
+        try:
+            normalized_waypoints.append({"x": float(x), "y": float(y)})
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"路径点 #{index} 的 x/y 不是有效数字，未下发 MQTT") from exc
+
+    return normalized_waypoints
+
+
+async def _maybe_publish_task_path(task: Task) -> dict:
+    if not task.executor:
+        return {
+            "mqtt_sent": False,
+            "mqtt_topic": None,
+            "mqtt_msg_id": None,
+            "mqtt_error": None,
+            "mqtt_state": "waiting_for_car",
+        }
+
+    topic = f"car/{task.executor.id}/path"
+    if not task.path_info:
+        return {
+            "mqtt_sent": False,
+            "mqtt_topic": topic,
+            "mqtt_msg_id": None,
+            "mqtt_error": None,
+            "mqtt_state": "waiting_for_path",
+        }
+
+    try:
+        waypoints = _normalize_waypoints(task.path_info.waypoints)
+    except ValueError as exc:
+        return {
+            "mqtt_sent": False,
+            "mqtt_topic": topic,
+            "mqtt_msg_id": None,
+            "mqtt_error": str(exc),
+            "mqtt_state": "invalid_path",
+        }
+
+    try:
+        publish_result = await publish_path_to_car(
+            device_id=str(task.executor.id),
+            task_id=task.id,
+            path_id=task.path_info.id,
+            waypoints=waypoints,
+        )
+    except Exception as exc:
+        print(
+            "❌ 任务路径 MQTT 下发失败: "
+            f"task_id={task.id}, car_id={task.executor.id}, path_id={task.path_info.id}, error={exc}"
+        )
+        return {
+            "mqtt_sent": False,
+            "mqtt_topic": topic,
+            "mqtt_msg_id": None,
+            "mqtt_error": f"路径下发失败: {exc}",
+            "mqtt_state": "publish_failed",
+        }
+
+    return {
+        "mqtt_sent": True,
+        "mqtt_topic": publish_result["topic"],
+        "mqtt_msg_id": publish_result["msg_id"],
+        "mqtt_error": None,
+        "mqtt_state": "sent",
+    }
 
 # 1. 创建任务 (Create Task)
 # ==========================================
@@ -39,7 +135,7 @@ async def create_task(task_in: TaskCreate, db: AsyncSession = Depends(get_db)):
 # ==========================================
 # 2. 绑定路径 (Bind Path)
 # ==========================================
-@router.put("/{task_id}/bind_path/{path_id}", response_model=TaskRead, summary="给任务绑定路径")
+@router.put("/{task_id}/bind_path/{path_id}", summary="给任务绑定路径")
 async def bind_path_to_task(task_id: int, path_id: int, db: AsyncSession = Depends(get_db)):
     task = await db.get(Task, task_id)
     if not task:
@@ -51,8 +147,30 @@ async def bind_path_to_task(task_id: int, path_id: int, db: AsyncSession = Depen
         
     task.path_id = path.id
     await db.commit()
-    await db.refresh(task)
-    return task
+    task_with_relations = await _get_task_with_relations(db, task_id)
+    if not task_with_relations:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    mqtt_result = await _maybe_publish_task_path(task_with_relations)
+
+    if mqtt_result["mqtt_sent"]:
+        message = "路径已绑定并成功下发到小车"
+    elif mqtt_result["mqtt_state"] == "waiting_for_car":
+        message = "路径已绑定，待绑定车辆后自动下发"
+    else:
+        message = "路径已绑定，但 MQTT 下发失败"
+
+    return {
+        "message": message,
+        "success": True,
+        "task_id": task_with_relations.id,
+        "path_id": task_with_relations.path_id,
+        "car_id": task_with_relations.executor.id if task_with_relations.executor else None,
+        "mqtt_sent": mqtt_result["mqtt_sent"],
+        "mqtt_topic": mqtt_result["mqtt_topic"],
+        "mqtt_msg_id": mqtt_result["mqtt_msg_id"],
+        "mqtt_error": mqtt_result["mqtt_error"],
+    }
 
 # ==========================================
 # 3. 指派车辆 (Assign Car)
@@ -85,12 +203,31 @@ async def assign_car_to_task(task_id: int, car_id: int, db: AsyncSession = Depen
         task.status = TaskStatus.PENDING
     
     await db.commit()
+    task_with_relations = await _get_task_with_relations(db, task_id)
+    if not task_with_relations:
+        raise HTTPException(status_code=404, detail="任务不存在")
+
+    mqtt_result = await _maybe_publish_task_path(task_with_relations)
+
+    if mqtt_result["mqtt_sent"]:
+        message = f"车辆 {car.name} 已指派给任务 {task.name}，路径已下发"
+    elif mqtt_result["mqtt_state"] == "waiting_for_path":
+        message = f"车辆 {car.name} 已指派给任务 {task.name}，待绑定路径后自动下发"
+    else:
+        message = f"车辆 {car.name} 已指派给任务 {task.name}，但 MQTT 下发失败"
     
     return {
-        "message": f"车辆 {car.name} 已指派给任务 {task.name}", 
+        "message": message, 
         "success": True,
-        "task_status": task.status,
-        "task_status_desc": task.status.name # 返回 'SCHEDULED' 或 'PENDING' 字符串给前端
+        "task_status": task_with_relations.status,
+        "task_status_desc": task_with_relations.status.name, # 返回 'SCHEDULED' 或 'PENDING' 字符串给前端
+        "task_id": task_with_relations.id,
+        "path_id": task_with_relations.path_id,
+        "car_id": task_with_relations.executor.id if task_with_relations.executor else None,
+        "mqtt_sent": mqtt_result["mqtt_sent"],
+        "mqtt_topic": mqtt_result["mqtt_topic"],
+        "mqtt_msg_id": mqtt_result["mqtt_msg_id"],
+        "mqtt_error": mqtt_result["mqtt_error"],
     }
 
 

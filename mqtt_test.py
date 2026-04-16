@@ -1,68 +1,81 @@
-import paho.mqtt.client as mqtt
-import time
 import json
-import random
 import math
+import os
+import random
+import time
 
-# --- 配置参数 ---
-BROKER_ADDRESS = "broker.emqx.io" 
-BROKER_PORT = 1883
-TOPIC_LOCATION = "fire_car/device_001/location" 
+import paho.mqtt.client as mqtt
 
-# --- 连接回调函数 (1.x 版本，4个参数) ---
+MQTT_BROKER = os.getenv("MQTT_BROKER", "broker.emqx.io")
+MQTT_PORT = int(os.getenv("MQTT_PORT", "1883"))
+MQTT_USER = os.getenv("MQTT_USER", "hz_xulan")
+MQTT_PW = os.getenv("MQTT_PW", "xunlan123456")
+DEVICE_ID = os.getenv("MQTT_DEVICE_ID", "001")
+MQTT_TOPIC = os.getenv("MQTT_TOPIC", f"car/{DEVICE_ID}/status")
+
+
 def on_connect(client, userdata, flags, rc):
     if rc == 0:
-        print(f"✅ 成功连接到 MQTT 服务器: {BROKER_ADDRESS}")
+        print(f"✅ 成功连接到 MQTT 服务器: {MQTT_BROKER}:{MQTT_PORT}")
     else:
         print(f"❌ 连接失败，返回码: {rc}")
 
+
+def build_payload(step: int) -> dict:
+    angle = step / 5
+    speed = round(max(0.0, 0.6 * math.sin(step / 4) + random.uniform(-0.05, 0.05)), 2)
+    battery = max(0, 100 - step // 6)
+    gear = random.choice([1, 2, 3, 4])
+    mode = random.choice([1, 2])
+    timestamp = int(time.time())
+    x = round(3.5 + math.cos(angle) * 1.2, 3)
+    y = round(5.0 + math.sin(angle) * 1.2, 3)
+    yaw = round((math.degrees(angle) + 360) % 360, 2)
+
+    return {
+        "msg_id": f"state_{timestamp}_{random.randint(1000, 9999)}",
+        "version": "1.0",
+        "timestamp": timestamp,
+        "device_id": DEVICE_ID,
+        "data": {
+            "battery": battery,
+            "speed": speed,
+            "gear": gear,
+            "mode": mode,
+            "location": {
+                "x": x,
+                "y": y,
+                "yaw": yaw,
+            },
+        },
+    }
+
+
 def main():
-    # 1. 初始化客户端 (1.x 版本写法，直接用 client_id 关键字赋值避免警告)
-    client = mqtt.Client(client_id="Mock_Fire_Car_001")  
+    client = mqtt.Client(client_id=f"Mock_Car_{DEVICE_ID}")
+    client.username_pw_set(MQTT_USER, MQTT_PW)
     client.on_connect = on_connect
 
-    # 2. 连接服务器并启动网络循环
     print("正在尝试连接 Broker...")
-    client.connect(BROKER_ADDRESS, BROKER_PORT, 60)
-    client.loop_start() 
+    client.connect(MQTT_BROKER, MQTT_PORT, 60)
+    client.loop_start()
 
-    print("🚗 开始发送模拟小车数据 (按 Ctrl+C 停止)...\n")
-    
-    current_x = 0.0
-    current_y = 0.0
-    angle = 0.0
+    print("🚗 开始发送模拟状态消息 (按 Ctrl+C 停止)...\n")
+    step = 0
 
     try:
         while True:
-            # 模拟小车运动
-            current_x = 5.0 * math.cos(angle) + random.uniform(-0.1, 0.1)
-            current_y = 5.0 * math.sin(angle) + random.uniform(-0.1, 0.1)
-            angle += 0.2
-            
-            battery = random.randint(85, 100)
-            status = "0" if random.random() > 0.95 else "1"
-
-            payload = {
-                "device_id": "2",
-                "x": round(current_x, 3), 
-                "y": round(current_y, 3), 
-                "battery": battery,
-                "status": status,
-                "timestamp": int(time.time())
-            }
-            
-            payload_str = json.dumps(payload)
-            
-            # 3. 发布消息
-            client.publish(TOPIC_LOCATION, payload_str)
-            print(f"[发布] Topic: {TOPIC_LOCATION} | Payload: {payload_str}")
-            
+            payload = build_payload(step)
+            payload_text = json.dumps(payload, ensure_ascii=False)
+            client.publish(MQTT_TOPIC, payload_text)
+            print(f"[发布] Topic: {MQTT_TOPIC} | Payload: {payload_text}")
+            step += 1
             time.sleep(1)
-            
     except KeyboardInterrupt:
         print("\n🛑 停止发送数据，正在断开连接...")
         client.loop_stop()
         client.disconnect()
+
 
 if __name__ == "__main__":
     main()

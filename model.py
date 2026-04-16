@@ -25,12 +25,39 @@ class TaskStatus(enum.IntEnum):
 # ================= 1. 地图表 (Map) =================
 class Map(Base):
     __tablename__ = "maps"
-    
+
+    # 这张表现在不再保存“中心点经纬度地图”，
+    # 而是保存一张激光雷达栅格地图对应的：
+    # 1. 文件路径
+    # 2. 地图元数据
+    # 3. 图片尺寸信息
     id: Mapped[int] = mapped_column(primary_key=True, comment="区域ID")
     name: Mapped[str] = mapped_column(String(100), nullable=False, comment="区域名称")
-    center_lat: Mapped[float] = mapped_column(Float, nullable=False, comment="中心点纬度") 
-    center_lng: Mapped[float] = mapped_column(Float, nullable=False, comment="中心点经度")
-    zoom: Mapped[int] = mapped_column(Integer, default=16, comment="默认缩放级别")
+
+    # 三个 path 都是“相对 uploads/ 目录的路径字符串”，不是文件内容本身
+    # 例如：maps/abc123/map.pgm
+    pgm_path: Mapped[str] = mapped_column(String(255), nullable=False, comment="PGM地图相对路径")
+    yaml_path: Mapped[str] = mapped_column(String(255), nullable=False, comment="YAML配置相对路径")
+    preview_path: Mapped[str] = mapped_column(String(255), nullable=False, comment="PNG预览图相对路径")
+
+    # resolution 表示“每个像素对应现实世界多少米”
+    # origin_x / origin_y / origin_yaw 来自地图 YAML 文件里的 origin
+    # 后续前端要把车辆位置画到地图上，就要依赖这些值做换算
+    resolution: Mapped[float] = mapped_column(Float, nullable=False, comment="地图分辨率(米/像素)")
+    origin_x: Mapped[float] = mapped_column(Float, nullable=False, default=0.0, comment="地图原点X")
+    origin_y: Mapped[float] = mapped_column(Float, nullable=False, default=0.0, comment="地图原点Y")
+    origin_yaw: Mapped[float] = mapped_column(Float, nullable=False, default=0.0, comment="地图原点朝向")
+
+    # width / height 是地图图片本身的像素尺寸
+    # 前端显示和坐标映射时也会用到
+    width: Mapped[int] = mapped_column(Integer, nullable=False, comment="地图宽度(像素)")
+    height: Mapped[int] = mapped_column(Integer, nullable=False, comment="地图高度(像素)")
+
+    # 预览图在后端会做主体裁剪，所以需要额外记录裁剪后的尺寸和偏移量
+    preview_width: Mapped[int] = mapped_column(Integer, nullable=False, comment="预览图宽度(像素)")
+    preview_height: Mapped[int] = mapped_column(Integer, nullable=False, comment="预览图高度(像素)")
+    preview_offset_x: Mapped[int] = mapped_column(Integer, nullable=False, default=0, comment="预览图相对原图的X偏移")
+    preview_offset_y: Mapped[int] = mapped_column(Integer, nullable=False, default=0, comment="预览图相对原图的Y偏移")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
 
     # 异步建议使用 selectin 加载
@@ -190,9 +217,11 @@ class CarHistory(Base):
     speed: Mapped[Optional[float]] = mapped_column(Float, comment="速度(m/s)")
     signal: Mapped[Optional[int]] = mapped_column(SmallInteger, comment="信号强度")
     
-    longitude: Mapped[Optional[float]] = mapped_column(DECIMAL(10, 7), comment="经度")
-    latitude: Mapped[Optional[float]] = mapped_column(DECIMAL(10, 7), comment="纬度")
+    longitude: Mapped[Optional[float]] = mapped_column(DECIMAL(10, 7), comment="地图相对X坐标")
+    latitude: Mapped[Optional[float]] = mapped_column(DECIMAL(10, 7), comment="地图相对Y坐标")
+    yaw: Mapped[Optional[float]] = mapped_column(Float, comment="相对地图原点的朝向(度)")
     
+    mode: Mapped[Optional[int]] = mapped_column(SmallInteger, comment="模式: 1-遥控, 2-自主导航")
     car_status: Mapped[Optional[int]] = mapped_column(SmallInteger, comment="小车状态")
     reported_at: Mapped[datetime] = mapped_column(DateTime(timezone=False), default=datetime.now, nullable=False, comment="上报时间")
 
@@ -219,4 +248,3 @@ class TaskSchedule(Base):
 
     # 简单的关系定义 (如果不需要反向查询，可以不写 back_populates)
     # 记得导入 Map, Path, Car 类
-

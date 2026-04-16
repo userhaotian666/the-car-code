@@ -3,172 +3,871 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>车辆实时轨迹监控 (带状态显示)</title>
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-    
+    <title>SLAM 地图上传与查看器</title>
     <style>
-        body { margin: 0; padding: 0; font-family: sans-serif; }
-        #map { height: 100vh; width: 100%; }
-        
-        /* 信息面板 */
-        #info-panel {
-            position: absolute; top: 20px; right: 20px;
-            background: rgba(255, 255, 255, 0.95);
-            padding: 15px; z-index: 1000;
-            border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.3);
-            min-width: 220px;
-            line-height: 1.8; /* 稍微增加行高 */
+        :root {
+            --bg: #f4efe7;
+            --panel: rgba(255, 251, 245, 0.96);
+            --ink: #20312e;
+            --muted: #61706d;
+            --accent: #0f766e;
+            --accent-strong: #115e59;
+            --accent-soft: rgba(15, 118, 110, 0.10);
+            --line: rgba(32, 49, 46, 0.12);
+            --success: #027a48;
+            --error: #b42318;
+            --shadow: 0 22px 58px rgba(21, 42, 38, 0.14);
         }
-        .status-badge {
-            padding: 5px 10px; border-radius: 4px; color: white; font-weight: bold;
-            display: inline-block; margin-bottom: 10px; width: 100%; box-sizing: border-box; text-align: center;
-        }
-        .connected { background-color: #28a745; } /* 网络连接-绿 */
-        .disconnected { background-color: #dc3545; } /* 网络断开-红 */
 
-        /* 明显的小车图标 */
-        .car-dot {
-            width: 16px; height: 16px;
-            background-color: #ff0000; 
-            border: 3px solid white;
-            border-radius: 50%;
-            box-shadow: 0 0 0 0 rgba(255, 0, 0, 0.7);
-            animation: pulse-red 1.5s infinite;
+        * {
+            box-sizing: border-box;
         }
-        @keyframes pulse-red {
-            0% { box-shadow: 0 0 0 0 rgba(255, 0, 0, 0.7); }
-            70% { box-shadow: 0 0 0 15px rgba(255, 0, 0, 0); }
-            100% { box-shadow: 0 0 0 0 rgba(255, 0, 0, 0); }
+
+        body {
+            margin: 0;
+            min-height: 100vh;
+            color: var(--ink);
+            font-family: "PingFang SC", "Noto Sans SC", sans-serif;
+            background:
+                radial-gradient(circle at top left, rgba(15, 118, 110, 0.14), transparent 28%),
+                radial-gradient(circle at bottom right, rgba(180, 35, 24, 0.08), transparent 22%),
+                linear-gradient(135deg, #f8f2e8 0%, #eff4f1 100%);
+        }
+
+        .page {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 28px 18px 36px;
+        }
+
+        .hero {
+            margin-bottom: 22px;
+            padding: 10px 6px;
+        }
+
+        .hero h1 {
+            margin: 0;
+            font-size: 38px;
+            line-height: 1.08;
+        }
+
+        .hero p {
+            margin: 14px 0 0;
+            max-width: 920px;
+            line-height: 1.8;
+            color: var(--muted);
+            font-size: 15px;
+        }
+
+        .layout {
+            display: grid;
+            grid-template-columns: 360px 1fr;
+            gap: 22px;
+            align-items: start;
+        }
+
+        .panel {
+            background: var(--panel);
+            border: 1px solid var(--line);
+            border-radius: 24px;
+            box-shadow: var(--shadow);
+            backdrop-filter: blur(12px);
+        }
+
+        .sidebar {
+            position: sticky;
+            top: 20px;
+            padding: 24px;
+        }
+
+        .section + .section {
+            margin-top: 26px;
+            padding-top: 26px;
+            border-top: 1px solid var(--line);
+        }
+
+        .eyebrow {
+            margin: 0 0 8px;
+            color: var(--accent);
+            font-size: 12px;
+            font-weight: 800;
+            letter-spacing: 0.16em;
+            text-transform: uppercase;
+        }
+
+        h2 {
+            margin: 0;
+            font-size: 22px;
+        }
+
+        .section-text {
+            margin: 10px 0 0;
+            color: var(--muted);
+            font-size: 14px;
+            line-height: 1.8;
+        }
+
+        .field {
+            margin-top: 16px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 8px;
+            font-size: 14px;
+            font-weight: 700;
+        }
+
+        input[type="text"],
+        input[type="file"],
+        select {
+            width: 100%;
+            border-radius: 16px;
+            border: 1px solid var(--line);
+            background: #fff;
+            color: var(--ink);
+            font-size: 14px;
+            padding: 14px 16px;
+        }
+
+        input[type="file"] {
+            padding: 12px 14px;
+        }
+
+        .hint {
+            margin-top: 6px;
+            color: var(--muted);
+            font-size: 12px;
+        }
+
+        .btn-row {
+            margin-top: 16px;
+            display: flex;
+            gap: 10px;
+        }
+
+        button {
+            border: 0;
+            border-radius: 15px;
+            padding: 14px 16px;
+            font-size: 14px;
+            font-weight: 800;
+            cursor: pointer;
+            transition: transform 0.16s ease, opacity 0.16s ease, box-shadow 0.16s ease;
+        }
+
+        button:hover:not(:disabled) {
+            transform: translateY(-1px);
+        }
+
+        button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        .btn-primary {
+            flex: 1;
+            color: #fff;
+            background: linear-gradient(135deg, var(--accent) 0%, var(--accent-strong) 100%);
+            box-shadow: 0 14px 28px rgba(15, 118, 110, 0.22);
+        }
+
+        .btn-secondary {
+            color: var(--accent-strong);
+            background: var(--accent-soft);
+            border: 1px solid rgba(15, 118, 110, 0.18);
+        }
+
+        .status {
+            min-height: 22px;
+            margin-top: 14px;
+            font-size: 14px;
+            font-weight: 700;
+        }
+
+        .status.success {
+            color: var(--success);
+        }
+
+        .status.error {
+            color: var(--error);
+        }
+
+        .viewer {
+            padding: 20px;
+        }
+
+        .viewer-top {
+            display: flex;
+            justify-content: space-between;
+            align-items: end;
+            gap: 18px;
+            margin-bottom: 18px;
+        }
+
+        .viewer-top h2 {
+            font-size: 28px;
+        }
+
+        .viewer-top p {
+            margin: 8px 0 0;
+            color: var(--muted);
+            font-size: 14px;
+            line-height: 1.8;
+        }
+
+        .canvas-shell {
+            position: relative;
+            min-height: 620px;
+            border-radius: 26px;
+            border: 1px solid rgba(15, 118, 110, 0.18);
+            background:
+                linear-gradient(45deg, rgba(15, 118, 110, 0.05) 25%, transparent 25%),
+                linear-gradient(-45deg, rgba(15, 118, 110, 0.05) 25%, transparent 25%),
+                linear-gradient(45deg, transparent 75%, rgba(15, 118, 110, 0.05) 75%),
+                linear-gradient(-45deg, transparent 75%, rgba(15, 118, 110, 0.05) 75%);
+            background-size: 28px 28px;
+            background-position: 0 0, 0 14px, 14px -14px, -14px 0;
+            overflow: hidden;
+        }
+
+        .viewer-stage {
+            position: absolute;
+            inset: 0;
+            overflow: hidden;
+            cursor: grab;
+        }
+
+        .viewer-stage.dragging {
+            cursor: grabbing;
+        }
+
+        .map-layer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            transform-origin: 0 0;
+            will-change: transform;
+            user-select: none;
+            pointer-events: none;
+        }
+
+        .map-layer img {
+            display: block;
+            max-width: none;
+            user-select: none;
+            -webkit-user-drag: none;
+        }
+
+        .empty-state {
+            position: absolute;
+            inset: 0;
+            display: grid;
+            place-items: center;
+            text-align: center;
+            color: var(--muted);
+            padding: 32px;
+            line-height: 1.9;
+        }
+
+        .inspect-badge {
+            position: absolute;
+            right: 18px;
+            bottom: 18px;
+            z-index: 2;
+            background: rgba(21, 33, 31, 0.88);
+            color: #effcf7;
+            padding: 12px 14px;
+            border-radius: 16px;
+            font-size: 13px;
+            line-height: 1.7;
+            min-width: 240px;
+        }
+
+        .meta-grid {
+            margin-top: 18px;
+            display: grid;
+            grid-template-columns: repeat(3, minmax(180px, 1fr));
+            gap: 12px;
+        }
+
+        .meta-card {
+            border: 1px solid var(--line);
+            border-radius: 18px;
+            background: rgba(255, 255, 255, 0.82);
+            padding: 15px;
+        }
+
+        .meta-card .k {
+            color: var(--muted);
+            font-size: 12px;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+        }
+
+        .meta-card .v {
+            margin-top: 8px;
+            font-size: 16px;
+            font-weight: 800;
+            word-break: break-word;
+        }
+
+        .links {
+            margin-top: 16px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+
+        .links a {
+            text-decoration: none;
+            color: var(--accent-strong);
+            border: 1px solid rgba(15, 118, 110, 0.18);
+            background: var(--accent-soft);
+            border-radius: 999px;
+            padding: 10px 14px;
+            font-size: 14px;
+            font-weight: 700;
+        }
+
+        .json-block {
+            margin-top: 16px;
+            background: #16211f;
+            color: #ebfef7;
+            border-radius: 20px;
+            padding: 16px;
+            font-size: 13px;
+            line-height: 1.7;
+            overflow: auto;
+        }
+
+        @media (max-width: 1080px) {
+            .layout {
+                grid-template-columns: 1fr;
+            }
+
+            .sidebar {
+                position: static;
+            }
+
+            .meta-grid {
+                grid-template-columns: repeat(2, minmax(180px, 1fr));
+            }
+        }
+
+        @media (max-width: 720px) {
+            .page {
+                padding: 20px 12px 30px;
+            }
+
+            .hero h1 {
+                font-size: 30px;
+            }
+
+            .btn-row {
+                flex-direction: column;
+            }
+
+            .meta-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .canvas-shell {
+                min-height: 420px;
+            }
         }
     </style>
 </head>
 <body>
+    <div class="page">
+        <section class="hero">
+            <p class="eyebrow">SLAM Map Workflow</p>
+            <h1>地图上传与查看器</h1>
+            <p>
+                这个页面把两件事放到了一起：左边上传 `PGM + YAML` 地图到后端，右边从后端拉取已经处理好的地图，
+                直接用 `preview_url` 做查看器显示。你可以缩放、拖拽，并且点击地图查看像素坐标和换算后的世界坐标。
+            </p>
+        </section>
 
-    <div id="info-panel">
-        <div id="ws-status-badge" class="status-badge disconnected">等待连接...</div>
-        <div>车辆ID: <b id="car-id">--</b></div>
-        <div>运行状态: <b id="car-status">--</b></div>
-        <div>剩余电量: <b id="battery">--</b>%</div>
-        <div>当前坐标: <span id="coords" style="font-family: monospace; font-size: 0.9em;">--</span></div>
-        <div style="margin-top:10px; font-size:12px; color:#666; border-top: 1px solid #eee; padding-top:5px;">
-            * 地图将自动跟随车辆移动
+        <div class="layout">
+            <aside class="panel sidebar">
+                <section class="section">
+                    <p class="eyebrow">Connection</p>
+                    <h2>后端地址</h2>
+                    <div class="field">
+                        <label for="server-url">Server URL</label>
+                        <input id="server-url" type="text" value="http://127.0.0.1:8000">
+                        <div class="hint">地图上传、列表拉取和预览图访问都会走这个地址。</div>
+                    </div>
+                </section>
+
+                <section class="section">
+                    <p class="eyebrow">Upload</p>
+                    <h2>上传地图</h2>
+                    <p class="section-text">
+                        上传后后端会保存原始文件、解析 YAML、生成 PNG 预览图，然后把处理后的地图信息返回给前端。
+                    </p>
+
+                    <form id="upload-form">
+                        <div class="field">
+                            <label for="map-name">地图名称</label>
+                            <input id="map-name" name="name" type="text" placeholder="例如：一楼东侧走廊" required>
+                        </div>
+
+                        <div class="field">
+                            <label for="pgm-file">PGM 文件</label>
+                            <input id="pgm-file" name="pgm_file" type="file" accept=".pgm" required>
+                        </div>
+
+                        <div class="field">
+                            <label for="yaml-file">YAML 文件</label>
+                            <input id="yaml-file" name="yaml_file" type="file" accept=".yaml,.yml" required>
+                            <div class="hint">这两个文件需要成对上传。</div>
+                        </div>
+
+                        <div class="btn-row">
+                            <button id="submit-btn" class="btn-primary" type="submit">上传并预览</button>
+                        </div>
+                        <div id="upload-status" class="status"></div>
+                    </form>
+                </section>
+
+                <section class="section">
+                    <p class="eyebrow">Browser</p>
+                    <h2>地图列表</h2>
+                    <p class="section-text">
+                        这里会从 `/maps/` 拉取已经上传过的地图。选择后点击“加载地图”即可进入查看器。
+                    </p>
+
+                    <div class="field">
+                        <label for="map-select">已上传地图</label>
+                        <select id="map-select">
+                            <option value="">请先点击刷新列表</option>
+                        </select>
+                    </div>
+
+                    <div class="btn-row">
+                        <button id="refresh-btn" class="btn-secondary" type="button">刷新列表</button>
+                        <button id="load-btn" class="btn-primary" type="button">加载地图</button>
+                    </div>
+
+                    <div class="btn-row">
+                        <button id="reset-view-btn" class="btn-secondary" type="button">重置视图</button>
+                    </div>
+
+                    <div id="browser-status" class="status"></div>
+                </section>
+            </aside>
+
+            <section class="panel viewer">
+                <div class="viewer-top">
+                    <div>
+                        <p class="eyebrow">Viewer</p>
+                        <h2>处理后的地图查看器</h2>
+                        <p>
+                            鼠标滚轮可以缩放，按住拖拽可以平移。点击地图后，右下角会显示当前点击位置的像素坐标和换算后的世界坐标。
+                        </p>
+                    </div>
+                </div>
+
+                <div id="canvas-shell" class="canvas-shell">
+                    <div id="empty-state" class="empty-state">
+                        还没有加载地图。<br>
+                        先上传一张地图，或者从左侧地图列表里选择一张后点击“加载地图”。
+                    </div>
+
+                    <div id="viewer-stage" class="viewer-stage">
+                        <div id="map-layer" class="map-layer">
+                            <img id="map-image" alt="地图预览图">
+                        </div>
+                    </div>
+
+                    <div id="inspect-badge" class="inspect-badge" style="display:none;">
+                        点击地图后，这里会显示坐标信息。
+                    </div>
+                </div>
+
+                <div id="meta-grid" class="meta-grid" style="display:none;"></div>
+                <div id="links" class="links" style="display:none;"></div>
+                <pre id="json-block" class="json-block" style="display:none;"></pre>
+            </section>
         </div>
     </div>
 
-    <div id="map"></div>
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-
     <script>
-        // ================= 配置 =================
-        const CONFIG = {
-            carId: 11,
-            wsUrl: 'ws://127.0.0.1:8000/history/11/monitor',
-            maxPoints: 500
+        const dom = {
+            serverUrl: document.getElementById("server-url"),
+            uploadForm: document.getElementById("upload-form"),
+            submitBtn: document.getElementById("submit-btn"),
+            uploadStatus: document.getElementById("upload-status"),
+            browserStatus: document.getElementById("browser-status"),
+            refreshBtn: document.getElementById("refresh-btn"),
+            loadBtn: document.getElementById("load-btn"),
+            resetViewBtn: document.getElementById("reset-view-btn"),
+            mapSelect: document.getElementById("map-select"),
+            emptyState: document.getElementById("empty-state"),
+            viewerStage: document.getElementById("viewer-stage"),
+            mapLayer: document.getElementById("map-layer"),
+            mapImage: document.getElementById("map-image"),
+            inspectBadge: document.getElementById("inspect-badge"),
+            metaGrid: document.getElementById("meta-grid"),
+            links: document.getElementById("links"),
+            jsonBlock: document.getElementById("json-block")
         };
 
-        // 新增：状态映射配置
-        const STATUS_MAP = {
-            0: { text: "⚠️ 故障 (FAULT)", color: "#dc3545" },   // 红色
-            1: { text: "⏳ 待机 (STANDBY)", color: "#6c757d" }, // 灰色
-            2: { text: "🚀 运行中 (RUNNING)", color: "#007bff" } // 蓝色
+        const viewerState = {
+            currentMap: null,
+            maps: [],
+            scale: 1,
+            minScale: 0.05,
+            maxScale: 20,
+            translateX: 0,
+            translateY: 0,
+            dragging: false,
+            dragMoved: false,
+            dragStartX: 0,
+            dragStartY: 0,
+            originTranslateX: 0,
+            originTranslateY: 0
         };
-        // =======================================
 
-        const map = L.map('map').setView([31.2304, 121.4737], 18);
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-            attribution: '© OpenStreetMap'
-        }).addTo(map);
+        function normalizeServerUrl() {
+            return dom.serverUrl.value.trim().replace(/\/$/, "");
+        }
 
-        let ws = null;
-        let carMarker = null;
-        let pathLine = null;
-        let pathPoints = []; 
+        function setStatus(target, message, type = "") {
+            target.textContent = message;
+            target.className = `status ${type}`.trim();
+        }
 
-        const carIcon = L.divIcon({
-            className: 'custom-icon',
-            html: '<div class="car-dot"></div>',
-            iconSize: [22, 22],
-            iconAnchor: [11, 11]
+        function applyTransform() {
+            dom.mapLayer.style.transform =
+                `translate(${viewerState.translateX}px, ${viewerState.translateY}px) scale(${viewerState.scale})`;
+        }
+
+        function resetInspectionTip() {
+            dom.inspectBadge.style.display = "none";
+            dom.inspectBadge.innerHTML = "点击地图后，这里会显示坐标信息。";
+        }
+
+        function renderMetadata(data) {
+            const items = [
+                ["地图 ID", data.id],
+                ["地图名称", data.name],
+                ["分辨率", data.resolution],
+                ["原点 X", data.origin_x],
+                ["原点 Y", data.origin_y],
+                ["原点朝向", data.origin_yaw],
+                ["原图宽度", data.width],
+                ["原图高度", data.height],
+                ["预览宽度", data.preview_width],
+                ["预览高度", data.preview_height],
+                ["裁剪偏移 X", data.preview_offset_x],
+                ["裁剪偏移 Y", data.preview_offset_y],
+                ["创建时间", data.created_at]
+            ];
+
+            dom.metaGrid.innerHTML = items.map(([key, value]) => `
+                <div class="meta-card">
+                    <div class="k">${key}</div>
+                    <div class="v">${value ?? "-"}</div>
+                </div>
+            `).join("");
+            dom.metaGrid.style.display = "grid";
+        }
+
+        function renderLinks(data) {
+            const links = [
+                ["查看预览图", data.preview_url],
+                ["查看 PGM", data.pgm_url],
+                ["查看 YAML", data.yaml_url]
+            ];
+
+            dom.links.innerHTML = links.map(([label, href]) => `
+                <a href="${href}" target="_blank" rel="noreferrer">${label}</a>
+            `).join("");
+            dom.links.style.display = "flex";
+        }
+
+        function renderJson(data) {
+            dom.jsonBlock.textContent = JSON.stringify(data, null, 2);
+            dom.jsonBlock.style.display = "block";
+        }
+
+        function populateMapSelect(maps) {
+            if (!maps.length) {
+                dom.mapSelect.innerHTML = `<option value="">暂无地图，请先上传</option>`;
+                return;
+            }
+
+            dom.mapSelect.innerHTML = maps.map(map => `
+                <option value="${map.id}">${map.name} (#${map.id})</option>
+            `).join("");
+        }
+
+        async function fetchMapsList() {
+            const serverUrl = normalizeServerUrl();
+            if (!serverUrl) {
+                setStatus(dom.browserStatus, "请先填写后端地址。", "error");
+                return;
+            }
+
+            setStatus(dom.browserStatus, "正在拉取地图列表...");
+            try {
+                const response = await fetch(`${serverUrl}/maps/`);
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.detail || "拉取地图列表失败");
+                }
+
+                viewerState.maps = data;
+                populateMapSelect(data);
+                setStatus(dom.browserStatus, `已获取 ${data.length} 张地图。`, "success");
+            } catch (error) {
+                setStatus(dom.browserStatus, `地图列表获取失败：${error.message}`, "error");
+            }
+        }
+
+        function fitMapToStage() {
+            if (!viewerState.currentMap) {
+                return;
+            }
+
+            const stageRect = dom.viewerStage.getBoundingClientRect();
+            const mapWidth = viewerState.currentMap.preview_width || dom.mapImage.naturalWidth;
+            const mapHeight = viewerState.currentMap.preview_height || dom.mapImage.naturalHeight;
+
+            if (!mapWidth || !mapHeight || !stageRect.width || !stageRect.height) {
+                return;
+            }
+
+            const fitScale = Math.min(stageRect.width / mapWidth, stageRect.height / mapHeight) * 0.94;
+            viewerState.scale = Math.max(viewerState.minScale, Math.min(fitScale, viewerState.maxScale));
+            viewerState.translateX = (stageRect.width - mapWidth * viewerState.scale) / 2;
+            viewerState.translateY = (stageRect.height - mapHeight * viewerState.scale) / 2;
+            applyTransform();
+        }
+
+        function showMap(data) {
+            viewerState.currentMap = data;
+            dom.emptyState.style.display = "none";
+            dom.mapImage.src = data.preview_url;
+            dom.mapImage.onload = () => fitMapToStage();
+            renderMetadata(data);
+            renderLinks(data);
+            renderJson(data);
+            resetInspectionTip();
+        }
+
+        async function loadSelectedMap(mapId) {
+            const serverUrl = normalizeServerUrl();
+            if (!serverUrl) {
+                setStatus(dom.browserStatus, "请先填写后端地址。", "error");
+                return;
+            }
+
+            if (!mapId) {
+                setStatus(dom.browserStatus, "请先从下拉列表里选择一张地图。", "error");
+                return;
+            }
+
+            setStatus(dom.browserStatus, "正在加载地图详情...");
+            try {
+                const response = await fetch(`${serverUrl}/maps/${mapId}`);
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.detail || "加载地图失败");
+                }
+
+                showMap(data);
+                setStatus(dom.browserStatus, `地图 ${data.name} 已加载，可以开始查看。`, "success");
+            } catch (error) {
+                setStatus(dom.browserStatus, `地图加载失败：${error.message}`, "error");
+            }
+        }
+
+        function mapPixelToWorld(mapInfo, pixelX, pixelY) {
+            const resolution = Number(mapInfo.resolution);
+            const yaw = Number(mapInfo.origin_yaw || 0);
+            const originalPixelX = pixelX + Number(mapInfo.preview_offset_x || 0);
+            const originalPixelY = pixelY + Number(mapInfo.preview_offset_y || 0);
+            const localX = originalPixelX * resolution;
+            const localY = (mapInfo.height - originalPixelY) * resolution;
+
+            const cosYaw = Math.cos(yaw);
+            const sinYaw = Math.sin(yaw);
+
+            const worldX = mapInfo.origin_x + localX * cosYaw - localY * sinYaw;
+            const worldY = mapInfo.origin_y + localX * sinYaw + localY * cosYaw;
+
+            return { worldX, worldY };
+        }
+
+        function inspectAt(clientX, clientY) {
+            if (!viewerState.currentMap) {
+                return;
+            }
+
+            const rect = dom.viewerStage.getBoundingClientRect();
+            const stageX = clientX - rect.left;
+            const stageY = clientY - rect.top;
+
+            const pixelX = (stageX - viewerState.translateX) / viewerState.scale;
+            const pixelY = (stageY - viewerState.translateY) / viewerState.scale;
+
+            if (
+                pixelX < 0 ||
+                pixelY < 0 ||
+                pixelX > viewerState.currentMap.preview_width ||
+                pixelY > viewerState.currentMap.preview_height
+            ) {
+                return;
+            }
+
+            const { worldX, worldY } = mapPixelToWorld(viewerState.currentMap, pixelX, pixelY);
+
+            dom.inspectBadge.style.display = "block";
+            dom.inspectBadge.innerHTML = `
+                <strong>点击坐标</strong><br>
+                像素坐标: (${pixelX.toFixed(2)}, ${pixelY.toFixed(2)})<br>
+                世界坐标: (${worldX.toFixed(3)}, ${worldY.toFixed(3)})<br>
+                当前缩放: ${viewerState.scale.toFixed(3)}x
+            `;
+        }
+
+        dom.uploadForm.addEventListener("submit", async (event) => {
+            event.preventDefault();
+
+            const serverUrl = normalizeServerUrl();
+            const mapName = document.getElementById("map-name").value.trim();
+            const pgmFile = document.getElementById("pgm-file").files[0];
+            const yamlFile = document.getElementById("yaml-file").files[0];
+
+            if (!serverUrl || !mapName || !pgmFile || !yamlFile) {
+                setStatus(dom.uploadStatus, "请先把后端地址、地图名称、PGM 文件和 YAML 文件填完整。", "error");
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append("name", mapName);
+            formData.append("pgm_file", pgmFile);
+            formData.append("yaml_file", yamlFile);
+
+            dom.submitBtn.disabled = true;
+            setStatus(dom.uploadStatus, "地图上传中，请稍候...");
+
+            try {
+                const response = await fetch(`${serverUrl}/maps/upload`, {
+                    method: "POST",
+                    body: formData
+                });
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.detail || "上传失败");
+                }
+
+                showMap(data);
+                setStatus(dom.uploadStatus, "地图上传成功，查看器已切换到新地图。", "success");
+                await fetchMapsList();
+                dom.mapSelect.value = String(data.id);
+            } catch (error) {
+                setStatus(dom.uploadStatus, `上传失败：${error.message}`, "error");
+            } finally {
+                dom.submitBtn.disabled = false;
+            }
         });
 
-        // UI 元素引用
-        const dom = {
-            wsStatus: document.getElementById('ws-status-badge'),
-            id: document.getElementById('car-id'),
-            battery: document.getElementById('battery'),
-            coords: document.getElementById('coords'),
-            carStatus: document.getElementById('car-status') // 新增
-        };
+        dom.refreshBtn.addEventListener("click", fetchMapsList);
 
-        function connect() {
-            ws = new WebSocket(CONFIG.wsUrl);
+        dom.loadBtn.addEventListener("click", async () => {
+            await loadSelectedMap(dom.mapSelect.value);
+        });
 
-            ws.onopen = () => {
-                dom.wsStatus.textContent = "🟢 网络已连接";
-                dom.wsStatus.className = "status-badge connected";
-                dom.id.textContent = CONFIG.carId;
-                console.log("WebSocket 已连接");
-            };
+        dom.resetViewBtn.addEventListener("click", () => {
+            fitMapToStage();
+            setStatus(dom.browserStatus, "视图已重置到适合窗口的大小。", "success");
+        });
 
-            ws.onmessage = (event) => {
-                try {
-                    const data = JSON.parse(event.data);
-                    updateMap(data);
-                } catch (e) {
-                    console.error("数据解析错误:", e);
-                }
-            };
-
-            ws.onclose = () => {
-                dom.wsStatus.textContent = "🔴 网络断开 (3秒后重连)";
-                dom.wsStatus.className = "status-badge disconnected";
-                setTimeout(connect, 3000);
-            };
-        }
-
-        function updateMap(data) {
-            // 1. 更新基础文本
-            dom.battery.textContent = data.battery;
-            dom.coords.textContent = `${data.latitude.toFixed(5)}, ${data.longitude.toFixed(5)}`;
-
-            // 2. 【新增】更新车辆状态显示
-            // 假设后端传回来的字段名为 'car_status' (如果是其他名字，请修改 data.car_status)
-            if (data.car_status !== undefined && STATUS_MAP[data.car_status]) {
-                const s = STATUS_MAP[data.car_status];
-                dom.carStatus.textContent = s.text;
-                dom.carStatus.style.color = s.color;
-            } else {
-                dom.carStatus.textContent = "未知状态";
-                dom.carStatus.style.color = "black";
+        dom.viewerStage.addEventListener("wheel", (event) => {
+            if (!viewerState.currentMap) {
+                return;
             }
 
-            // 3. 地图绘制逻辑
-            const point = [data.latitude, data.longitude];
-            
-            pathPoints.push(point);
-            if (pathPoints.length > CONFIG.maxPoints) pathPoints.shift();
+            event.preventDefault();
+            const rect = dom.viewerStage.getBoundingClientRect();
+            const cursorX = event.clientX - rect.left;
+            const cursorY = event.clientY - rect.top;
 
-            if (!pathLine) {
-                pathLine = L.polyline(pathPoints, {
-                    color: 'red',
-                    weight: 6,
-                    opacity: 0.9,
-                    lineJoin: 'round'
-                }).addTo(map);
-            } else {
-                pathLine.setLatLngs(pathPoints);
+            const zoomFactor = event.deltaY < 0 ? 1.12 : 0.89;
+            const nextScale = Math.max(
+                viewerState.minScale,
+                Math.min(viewerState.scale * zoomFactor, viewerState.maxScale)
+            );
+
+            const worldX = (cursorX - viewerState.translateX) / viewerState.scale;
+            const worldY = (cursorY - viewerState.translateY) / viewerState.scale;
+
+            viewerState.scale = nextScale;
+            viewerState.translateX = cursorX - worldX * viewerState.scale;
+            viewerState.translateY = cursorY - worldY * viewerState.scale;
+            applyTransform();
+        }, { passive: false });
+
+        dom.viewerStage.addEventListener("pointerdown", (event) => {
+            if (!viewerState.currentMap) {
+                return;
             }
 
-            if (!carMarker) {
-                carMarker = L.marker(point, {icon: carIcon}).addTo(map);
-            } else {
-                carMarker.setLatLng(point);
+            viewerState.dragging = true;
+            viewerState.dragMoved = false;
+            viewerState.dragStartX = event.clientX;
+            viewerState.dragStartY = event.clientY;
+            viewerState.originTranslateX = viewerState.translateX;
+            viewerState.originTranslateY = viewerState.translateY;
+            dom.viewerStage.classList.add("dragging");
+        });
+
+        window.addEventListener("pointermove", (event) => {
+            if (!viewerState.dragging) {
+                return;
             }
 
-            map.panTo(point);
-        }
+            const dx = event.clientX - viewerState.dragStartX;
+            const dy = event.clientY - viewerState.dragStartY;
 
-        connect();
+            if (Math.abs(dx) > 2 || Math.abs(dy) > 2) {
+                viewerState.dragMoved = true;
+            }
+
+            viewerState.translateX = viewerState.originTranslateX + dx;
+            viewerState.translateY = viewerState.originTranslateY + dy;
+            applyTransform();
+        });
+
+        window.addEventListener("pointerup", (event) => {
+            if (!viewerState.dragging) {
+                return;
+            }
+
+            dom.viewerStage.classList.remove("dragging");
+            const wasDrag = viewerState.dragMoved;
+            viewerState.dragging = false;
+
+            if (!wasDrag) {
+                inspectAt(event.clientX, event.clientY);
+            }
+        });
+
+        window.addEventListener("resize", () => {
+            if (viewerState.currentMap) {
+                fitMapToStage();
+            }
+        });
+
+        fetchMapsList();
     </script>
 </body>
 </html>

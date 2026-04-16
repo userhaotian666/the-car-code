@@ -1,19 +1,22 @@
+from datetime import datetime
+
 from pydantic import BaseModel
 
-# 创建地图时，前端传来的数据
-class MapCreate(BaseModel):
-    name: str
-    center_lat: float
-    center_lng: float
-    zoom: int = 16 # 默认值
 
-# 返回给前端的数据
 class MapOut(BaseModel):
     id: int
     name: str
-    center_lat: float
-    center_lng: float
-    zoom: int
-    
-    class Config:
-        from_attributes = True
+    pgm_url: str
+    yaml_url: str
+    preview_url: str
+    resolution: float
+    origin_x: float
+    origin_y: float
+    origin_yaw: float
+    width: int
+    height: int
+    preview_width: int
+    preview_height: int
+    preview_offset_x: int
+    preview_offset_y: int
+    created_at: datetime

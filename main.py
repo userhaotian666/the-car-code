@@ -1,21 +1,76 @@
 import asyncio # 【新增】导入 asyncio 用于创建后台任务
+from pathlib import Path
 from fastapi import FastAPI
 from contextlib import asynccontextmanager
 from database import engine, Base
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from sqlalchemy import inspect
 
 from routers import devices, car, map, mission, history, path, task, problem, command
 from service import start_scheduler, scheduler
+from map_storage import ensure_storage_root
+from model import CarHistory, Map
 
 # 【新增】导入你分出来的 MQTT 监听协程
 # 假设你按照之前的建议，把它放在了 mqtt 文件夹下的 client.py 中
 from MQTT import mqtt_listener 
 
 # --- 1. 使用 lifespan 管理启动和关闭 ---
+def validate_map_table_schema(sync_conn) -> None:
+    # create_all 只会“补不存在的表”，不会自动把旧表改成新结构。
+    # 所以这里先检查 maps 表是不是已经换成了新的地图文件结构。
+    # 如果还是旧的 center_lat / center_lng / zoom 结构，就直接报错提醒手动重建
+    inspector = inspect(sync_conn)
+    if "maps" not in inspector.get_table_names():
+        return
+
+    existing_columns = {column["name"] for column in inspector.get_columns("maps")}
+    expected_columns = {column.name for column in Map.__table__.columns}
+
+    if existing_columns != expected_columns:
+        raise RuntimeError(
+            "检测到 maps 表仍是旧结构或结构不匹配。请先手动删除或重建 maps 表，再重新启动服务。"
+        )
+
+
+def validate_car_history_table_schema(sync_conn) -> None:
+    inspector = inspect(sync_conn)
+    if "car_history" not in inspector.get_table_names():
+        return
+
+    existing_columns = {column["name"] for column in inspector.get_columns("car_history")}
+    expected_columns = {column.name for column in CarHistory.__table__.columns}
+    missing_columns = sorted(expected_columns - existing_columns)
+
+    if not missing_columns:
+        return
+
+    sql_statements = []
+    if "yaw" in missing_columns:
+        sql_statements.append(
+            "ALTER TABLE car_history ADD COLUMN yaw FLOAT NULL COMMENT '相对地图原点的朝向(度)';"
+        )
+    if "mode" in missing_columns:
+        sql_statements.append(
+            "ALTER TABLE car_history ADD COLUMN mode SMALLINT NULL COMMENT '模式: 1-遥控, 2-自主导航';"
+        )
+
+    sql_hint = "\n".join(sql_statements) if sql_statements else "请根据最新模型手动补齐 car_history 缺失列。"
+    raise RuntimeError(
+        "检测到 car_history 表缺少字段: "
+        f"{', '.join(missing_columns)}。\n"
+        "请先执行以下 SQL 更新数据库后再重新启动服务：\n"
+        f"{sql_hint}"
+    )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # --- 服务启动阶段 ---
     async with engine.begin() as conn:
+        await conn.run_sync(validate_map_table_schema)
+        await conn.run_sync(validate_car_history_table_schema)
         # run_sync 是关键，它允许在异步连接中执行同步的 SQLAlchemy 命令
         await conn.run_sync(Base.metadata.create_all)
     
@@ -38,6 +93,13 @@ async def lifespan(app: FastAPI):
 
 # --- 2. 初始化 App ---
 app = FastAPI(lifespan=lifespan)
+
+# 启动时先确保 uploads/maps 目录存在
+# 然后把整个 uploads 目录作为静态文件目录挂到 /static
+# 这样数据库里存的相对路径就能被前端通过 URL 访问到
+ensure_storage_root()
+static_root = Path(__file__).resolve().parent / "uploads"
+app.mount("/static", StaticFiles(directory=str(static_root)), name="static")
 
 # --- 3. 中间件配置 ---
 app.add_middleware(

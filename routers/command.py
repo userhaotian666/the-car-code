@@ -1,7 +1,8 @@
 import asyncio  # 必须引入这个来代替 time
+import math
 from datetime import datetime
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Depends
-from sqlalchemy import select, desc
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 # 导入你的 database 配置
@@ -11,17 +12,13 @@ from model import Command, CarHistory
 # 导入请求模型
 from schemas import ReturnToBaseRequest
 
-# === 预设基站坐标 ===
-BASE_STATION_LNG = 121.560037
-BASE_STATION_LAT = 25.039462
-
 async def simulate_return_trip(command_id: int, car_id: int):
     """
     异步后台任务：
     """
-    # === 预设基站坐标 ===
-    BASE_STATION_LNG = 120.074429
-    BASE_STATION_LAT = 30.135510
+    # === 预设基站地图坐标 ===
+    base_station_x = 120.074429
+    base_station_y = 30.135510
     
     # 定义判定范围 (阈值)，0.00005 约等于 5米范围
     THRESHOLD = 0.00005 
@@ -40,19 +37,19 @@ async def simulate_return_trip(command_id: int, car_id: int):
             if not last_record:
                 print(f"⚠️ 车辆 {car_id} 无历史记录，无法判断位置。")
                 # 这里可以选择设定一个默认起点，或者直接报错退出
-                # 为了健壮性，这里假设如果没有记录，则默认为不在基站，给个默认起点
-                start_lng, start_lat = 121.500000, 25.000000 
+                # 为了健壮性，这里假设如果没有记录，则默认为不在基站，给个默认地图坐标起点
+                start_x, start_y = 121.500000, 25.000000
             else:
-                start_lng = float(last_record.longitude)
-                start_lat = float(last_record.latitude)
-                print(f"📍 [异步] 获取到车辆起点: ({start_lat}, {start_lng})")
+                start_x = float(last_record.longitude or 0.0)
+                start_y = float(last_record.latitude or 0.0)
+                print(f"📍 [异步] 获取到车辆起点: ({start_x}, {start_y})")
 
             # ====================================================
             # 🔥 新增功能：检查是否已在基站 (Check if already at base)
             # ====================================================
             is_at_base = (
-                abs(start_lng - BASE_STATION_LNG) < THRESHOLD and 
-                abs(start_lat - BASE_STATION_LAT) < THRESHOLD
+                abs(start_x - base_station_x) < THRESHOLD and
+                abs(start_y - base_station_y) < THRESHOLD
             )
 
             if is_at_base:
@@ -87,17 +84,18 @@ async def simulate_return_trip(command_id: int, car_id: int):
             INTERVAL = 0.5
             STEPS = int(TOTAL_TIME / INTERVAL)
 
-            lng_step = (BASE_STATION_LNG - start_lng) / STEPS
-            lat_step = (BASE_STATION_LAT - start_lat) / STEPS
+            step_x = (base_station_x - start_x) / STEPS
+            step_y = (base_station_y - start_y) / STEPS
 
-            curr_lng = start_lng
-            curr_lat = start_lat
+            curr_x = start_x
+            curr_y = start_y
+            route_yaw = (math.degrees(math.atan2(step_y, step_x)) + 360) % 360
 
             print(f"🚗 车辆 {car_id} 开始自动返航 (Async)...")
 
             for _ in range(STEPS):
-                curr_lng += lng_step
-                curr_lat += lat_step
+                curr_x += step_x
+                curr_y += step_y
 
                 history = CarHistory(
                     car_id=car_id,
@@ -105,8 +103,10 @@ async def simulate_return_trip(command_id: int, car_id: int):
                     temperature=37.0,
                     speed=12.0,
                     signal=5,
-                    longitude=round(curr_lng, 7),
-                    latitude=round(curr_lat, 7),
+                    longitude=round(curr_x, 7),
+                    latitude=round(curr_y, 7),
+                    yaw=round(route_yaw, 2),
+                    mode=2,
                     car_status=2, 
                     reported_at=datetime.now()
                 )
@@ -120,8 +120,10 @@ async def simulate_return_trip(command_id: int, car_id: int):
             final_fix = CarHistory(
                 car_id=car_id,
                 battery=69, temperature=37.0, speed=0, signal=5,
-                longitude=BASE_STATION_LNG,
-                latitude=BASE_STATION_LAT,
+                longitude=base_station_x,
+                latitude=base_station_y,
+                yaw=round(route_yaw, 2),
+                mode=2,
                 car_status=0,
                 reported_at=datetime.now()
             )
