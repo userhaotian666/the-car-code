@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SLAM 地图上传与查看器</title>
+    <title>地图上传与小车实时监控测试页</title>
     <style>
         :root {
             --bg: #f4efe7;
@@ -35,7 +35,7 @@
         }
 
         .page {
-            max-width: 1400px;
+            max-width: 1440px;
             margin: 0 auto;
             padding: 28px 18px 36px;
         }
@@ -53,7 +53,7 @@
 
         .hero p {
             margin: 14px 0 0;
-            max-width: 920px;
+            max-width: 980px;
             line-height: 1.8;
             color: var(--muted);
             font-size: 15px;
@@ -61,7 +61,7 @@
 
         .layout {
             display: grid;
-            grid-template-columns: 360px 1fr;
+            grid-template-columns: 380px 1fr;
             gap: 22px;
             align-items: start;
         }
@@ -138,6 +138,7 @@
             margin-top: 6px;
             color: var(--muted);
             font-size: 12px;
+            line-height: 1.6;
         }
 
         .btn-row {
@@ -173,6 +174,7 @@
         }
 
         .btn-secondary {
+            flex: 1;
             color: var(--accent-strong);
             background: var(--accent-soft);
             border: 1px solid rgba(15, 118, 110, 0.18);
@@ -249,13 +251,13 @@
             transform-origin: 0 0;
             will-change: transform;
             user-select: none;
-            pointer-events: none;
         }
 
         .map-layer img {
             display: block;
             max-width: none;
             user-select: none;
+            pointer-events: none;
             -webkit-user-drag: none;
         }
 
@@ -284,6 +286,63 @@
             min-width: 240px;
         }
 
+        .car-marker {
+            position: absolute;
+            z-index: 4;
+            pointer-events: none;
+        }
+
+        .car-marker-icon {
+            position: relative;
+            width: 24px;
+            height: 24px;
+            transform: translate(-50%, -50%);
+            transform-origin: center center;
+        }
+
+        .car-marker-icon::before {
+            content: "";
+            position: absolute;
+            left: 50%;
+            top: 50%;
+            width: 0;
+            height: 0;
+            border-left: 10px solid transparent;
+            border-right: 10px solid transparent;
+            border-bottom: 18px solid #b42318;
+            transform: translate(-50%, -72%);
+            filter: drop-shadow(0 8px 16px rgba(180, 35, 24, 0.35));
+        }
+
+        .car-marker-icon::after {
+            content: "";
+            position: absolute;
+            left: 50%;
+            top: 50%;
+            width: 10px;
+            height: 10px;
+            border-radius: 999px;
+            background: #fff4ef;
+            border: 2px solid #7a271a;
+            transform: translate(-50%, -20%);
+        }
+
+        .car-marker-label {
+            position: absolute;
+            left: 50%;
+            top: calc(100% + 8px);
+            transform: translateX(-50%);
+            white-space: nowrap;
+            font-size: 12px;
+            font-weight: 800;
+            line-height: 1;
+            color: #fff;
+            background: rgba(32, 49, 46, 0.9);
+            border-radius: 999px;
+            padding: 6px 10px;
+            box-shadow: 0 8px 18px rgba(21, 42, 38, 0.24);
+        }
+
         .meta-grid {
             margin-top: 18px;
             display: grid;
@@ -298,14 +357,16 @@
             padding: 15px;
         }
 
-        .meta-card .k {
+        .meta-card .k,
+        .live-card .k {
             color: var(--muted);
             font-size: 12px;
             letter-spacing: 0.08em;
             text-transform: uppercase;
         }
 
-        .meta-card .v {
+        .meta-card .v,
+        .live-card .v {
             margin-top: 8px;
             font-size: 16px;
             font-weight: 800;
@@ -341,6 +402,47 @@
             overflow: auto;
         }
 
+        .live-grid {
+            margin-top: 14px;
+            display: grid;
+            grid-template-columns: repeat(2, minmax(120px, 1fr));
+            gap: 10px;
+        }
+
+        .live-card {
+            border: 1px solid var(--line);
+            border-radius: 16px;
+            background: rgba(255, 255, 255, 0.84);
+            padding: 12px 14px;
+        }
+
+        .mini-log {
+            margin-top: 14px;
+            max-height: 180px;
+            overflow: auto;
+            background: rgba(255, 255, 255, 0.72);
+            border: 1px solid var(--line);
+            border-radius: 18px;
+            padding: 10px 12px;
+        }
+
+        .mini-log-item {
+            padding: 8px 0;
+            font-size: 13px;
+            line-height: 1.6;
+            color: var(--ink);
+        }
+
+        .mini-log-item + .mini-log-item {
+            border-top: 1px solid rgba(32, 49, 46, 0.08);
+        }
+
+        .mini-log-time {
+            color: var(--muted);
+            font-size: 11px;
+            margin-right: 8px;
+        }
+
         @media (max-width: 1080px) {
             .layout {
                 grid-template-columns: 1fr;
@@ -368,7 +470,8 @@
                 flex-direction: column;
             }
 
-            .meta-grid {
+            .meta-grid,
+            .live-grid {
                 grid-template-columns: 1fr;
             }
 
@@ -381,11 +484,12 @@
 <body>
     <div class="page">
         <section class="hero">
-            <p class="eyebrow">SLAM Map Workflow</p>
-            <h1>地图上传与查看器</h1>
+            <p class="eyebrow">SLAM + Realtime Monitor</p>
+            <h1>地图上传与小车实时监控测试页</h1>
             <p>
-                这个页面把两件事放到了一起：左边上传 `PGM + YAML` 地图到后端，右边从后端拉取已经处理好的地图，
-                直接用 `preview_url` 做查看器显示。你可以缩放、拖拽，并且点击地图查看像素坐标和换算后的世界坐标。
+                这个页面把三件事放到了一起：上传 `PGM + YAML` 地图、查看后端生成的地图预览、
+                以及连接 `/history/{car_id}/monitor` websocket 查看小车实时数据。
+                如果 websocket 推来的状态里带有 `longitude / latitude / yaw`，页面会把车辆位置直接画到地图上。
             </p>
         </section>
 
@@ -397,7 +501,7 @@
                     <div class="field">
                         <label for="server-url">Server URL</label>
                         <input id="server-url" type="text" value="http://127.0.0.1:8000">
-                        <div class="hint">地图上传、列表拉取和预览图访问都会走这个地址。</div>
+                        <div class="hint">地图上传、车辆列表、websocket 连接和预览图访问都会走这个地址。</div>
                     </div>
                 </section>
 
@@ -457,6 +561,42 @@
 
                     <div id="browser-status" class="status"></div>
                 </section>
+
+                <section class="section">
+                    <p class="eyebrow">Realtime</p>
+                    <h2>小车实时监控</h2>
+                    <p class="section-text">
+                        点击“连接监控”后，页面会连接 `/history/{car_id}/monitor`。
+                        你可以一边看 websocket 推送的数据，一边观察地图上的位置标记是否随 MQTT 实际数据更新。
+                    </p>
+
+                    <div class="field">
+                        <label for="car-select">车辆列表</label>
+                        <select id="car-select">
+                            <option value="">请先点击刷新车辆</option>
+                        </select>
+                        <div class="hint">下拉框会从 `/cars/` 拉取小车列表，选中后会自动填入车 ID。</div>
+                    </div>
+
+                    <div class="field">
+                        <label for="car-id">监控车 ID</label>
+                        <input id="car-id" type="text" placeholder="例如：1">
+                    </div>
+
+                    <div class="btn-row">
+                        <button id="refresh-cars-btn" class="btn-secondary" type="button">刷新车辆</button>
+                        <button id="connect-ws-btn" class="btn-primary" type="button">连接监控</button>
+                    </div>
+
+                    <div class="btn-row">
+                        <button id="disconnect-ws-btn" class="btn-secondary" type="button">断开连接</button>
+                        <button id="clear-log-btn" class="btn-secondary" type="button">清空日志</button>
+                    </div>
+
+                    <div id="ws-status" class="status"></div>
+                    <div id="live-grid" class="live-grid"></div>
+                    <div id="mini-log" class="mini-log"></div>
+                </section>
             </aside>
 
             <section class="panel viewer">
@@ -465,7 +605,8 @@
                         <p class="eyebrow">Viewer</p>
                         <h2>处理后的地图查看器</h2>
                         <p>
-                            鼠标滚轮可以缩放，按住拖拽可以平移。点击地图后，右下角会显示当前点击位置的像素坐标和换算后的世界坐标。
+                            鼠标滚轮可以缩放，按住拖拽可以平移。点击地图后，右下角会显示像素坐标和换算后的世界坐标。
+                            当 websocket 收到小车位置后，地图上会出现一个朝向标记。
                         </p>
                     </div>
                 </div>
@@ -479,6 +620,10 @@
                     <div id="viewer-stage" class="viewer-stage">
                         <div id="map-layer" class="map-layer">
                             <img id="map-image" alt="地图预览图">
+                            <div id="car-marker" class="car-marker" style="display:none;">
+                                <div id="car-marker-icon" class="car-marker-icon"></div>
+                                <div id="car-marker-label" class="car-marker-label">车辆</div>
+                            </div>
                         </div>
                     </div>
 
@@ -509,10 +654,22 @@
             viewerStage: document.getElementById("viewer-stage"),
             mapLayer: document.getElementById("map-layer"),
             mapImage: document.getElementById("map-image"),
+            carMarker: document.getElementById("car-marker"),
+            carMarkerIcon: document.getElementById("car-marker-icon"),
+            carMarkerLabel: document.getElementById("car-marker-label"),
             inspectBadge: document.getElementById("inspect-badge"),
             metaGrid: document.getElementById("meta-grid"),
             links: document.getElementById("links"),
-            jsonBlock: document.getElementById("json-block")
+            jsonBlock: document.getElementById("json-block"),
+            carSelect: document.getElementById("car-select"),
+            carId: document.getElementById("car-id"),
+            refreshCarsBtn: document.getElementById("refresh-cars-btn"),
+            connectWsBtn: document.getElementById("connect-ws-btn"),
+            disconnectWsBtn: document.getElementById("disconnect-ws-btn"),
+            clearLogBtn: document.getElementById("clear-log-btn"),
+            wsStatus: document.getElementById("ws-status"),
+            liveGrid: document.getElementById("live-grid"),
+            miniLog: document.getElementById("mini-log")
         };
 
         const viewerState = {
@@ -531,8 +688,36 @@
             originTranslateY: 0
         };
 
+        const monitorState = {
+            cars: [],
+            socket: null,
+            latestPayload: null,
+            reconnectTimer: null,
+            reconnectDelayMs: 3000,
+            manualClose: false,
+            activeCarId: "",
+            activeCarName: ""
+        };
+
+        const CAR_STATUS_LABELS = {
+            0: "待机",
+            1: "充电执行中",
+            2: "任务执行中",
+            3: "任务完成返回中",
+            4: "异常状态"
+        };
+
         function normalizeServerUrl() {
             return dom.serverUrl.value.trim().replace(/\/$/, "");
+        }
+
+        function normalizeWebSocketUrl(serverUrl, carId) {
+            const url = new URL(serverUrl);
+            url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+            url.pathname = `/history/${carId}/monitor`;
+            url.search = "";
+            url.hash = "";
+            return url.toString();
         }
 
         function setStatus(target, message, type = "") {
@@ -548,6 +733,18 @@
         function resetInspectionTip() {
             dom.inspectBadge.style.display = "none";
             dom.inspectBadge.innerHTML = "点击地图后，这里会显示坐标信息。";
+        }
+
+        function hideCarMarker() {
+            dom.carMarker.style.display = "none";
+        }
+
+        function setCarMarker(x, y, yaw, label) {
+            dom.carMarker.style.left = `${x}px`;
+            dom.carMarker.style.top = `${y}px`;
+            dom.carMarker.style.display = "block";
+            dom.carMarkerIcon.style.transform = `translate(-50%, -50%) rotate(${yaw}deg)`;
+            dom.carMarkerLabel.textContent = label;
         }
 
         function renderMetadata(data) {
@@ -605,6 +802,76 @@
             `).join("");
         }
 
+        function populateCarSelect(cars) {
+            if (!cars.length) {
+                dom.carSelect.innerHTML = `<option value="">暂无车辆，请先在后端创建</option>`;
+                return;
+            }
+
+            dom.carSelect.innerHTML = [
+                `<option value="">请选择要监控的小车</option>`,
+                ...cars.map(car => `
+                    <option value="${car.id}" data-name="${car.name}">${car.name} (#${car.id}) - ${car.ip_address}</option>
+                `)
+            ].join("");
+        }
+
+        function renderLiveData(payload) {
+            if (!payload) {
+                dom.liveGrid.innerHTML = `
+                    <div class="live-card">
+                        <div class="k">状态</div>
+                        <div class="v">等待连接 websocket</div>
+                    </div>
+                    <div class="live-card">
+                        <div class="k">说明</div>
+                        <div class="v">连接成功后，这里会显示最新一条实时数据</div>
+                    </div>
+                `;
+                return;
+            }
+
+            const statusValue = payload.car_status;
+            const statusText = CAR_STATUS_LABELS[statusValue] ?? "未知状态";
+
+            const items = [
+                ["车辆 ID", payload.car_id],
+                ["电量", payload.battery ?? "-"],
+                ["速度", payload.speed ?? "-"],
+                ["X", payload.longitude ?? "-"],
+                ["Y", payload.latitude ?? "-"],
+                ["Yaw", payload.yaw ?? "-"],
+                ["模式", payload.mode ?? "-"],
+                ["车辆状态", statusValue == null ? "-" : `${statusValue} (${statusText})`],
+                ["上报时间", payload.reported_at ?? "-"],
+                ["原始 JSON", JSON.stringify(payload)]
+            ];
+
+            dom.liveGrid.innerHTML = items.map(([key, value]) => `
+                <div class="live-card">
+                    <div class="k">${key}</div>
+                    <div class="v">${value}</div>
+                </div>
+            `).join("");
+        }
+
+        function addLog(message) {
+            const timeText = new Date().toLocaleTimeString();
+            const item = document.createElement("div");
+            item.className = "mini-log-item";
+            item.innerHTML = `<span class="mini-log-time">${timeText}</span>${message}`;
+            dom.miniLog.prepend(item);
+
+            while (dom.miniLog.children.length > 12) {
+                dom.miniLog.removeChild(dom.miniLog.lastChild);
+            }
+        }
+
+        function resetMonitorUi() {
+            renderLiveData(null);
+            dom.miniLog.innerHTML = `<div class="mini-log-item"><span class="mini-log-time">--:--:--</span>还没有 websocket 日志。</div>`;
+        }
+
         async function fetchMapsList() {
             const serverUrl = normalizeServerUrl();
             if (!serverUrl) {
@@ -629,6 +896,30 @@
             }
         }
 
+        async function fetchCarsList() {
+            const serverUrl = normalizeServerUrl();
+            if (!serverUrl) {
+                setStatus(dom.wsStatus, "请先填写后端地址。", "error");
+                return;
+            }
+
+            setStatus(dom.wsStatus, "正在拉取车辆列表...");
+            try {
+                const response = await fetch(`${serverUrl}/cars/`);
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.detail || "拉取车辆列表失败");
+                }
+
+                monitorState.cars = data;
+                populateCarSelect(data);
+                setStatus(dom.wsStatus, `已获取 ${data.length} 辆车，可开始连接监控。`, "success");
+            } catch (error) {
+                setStatus(dom.wsStatus, `车辆列表获取失败：${error.message}`, "error");
+            }
+        }
+
         function fitMapToStage() {
             if (!viewerState.currentMap) {
                 return;
@@ -649,11 +940,80 @@
             applyTransform();
         }
 
+        function mapPixelToWorld(mapInfo, pixelX, pixelY) {
+            const resolution = Number(mapInfo.resolution);
+            const yaw = Number(mapInfo.origin_yaw || 0);
+            const originalPixelX = pixelX + Number(mapInfo.preview_offset_x || 0);
+            const originalPixelY = pixelY + Number(mapInfo.preview_offset_y || 0);
+            const localX = originalPixelX * resolution;
+            const localY = (Number(mapInfo.height) - originalPixelY) * resolution;
+
+            const cosYaw = Math.cos(yaw);
+            const sinYaw = Math.sin(yaw);
+
+            const worldX = Number(mapInfo.origin_x) + localX * cosYaw - localY * sinYaw;
+            const worldY = Number(mapInfo.origin_y) + localX * sinYaw + localY * cosYaw;
+
+            return { worldX, worldY };
+        }
+
+        function worldToPreviewPixel(mapInfo, worldX, worldY) {
+            const resolution = Number(mapInfo.resolution);
+            const yaw = Number(mapInfo.origin_yaw || 0);
+            const deltaX = Number(worldX) - Number(mapInfo.origin_x || 0);
+            const deltaY = Number(worldY) - Number(mapInfo.origin_y || 0);
+
+            const cosYaw = Math.cos(yaw);
+            const sinYaw = Math.sin(yaw);
+            const localX = deltaX * cosYaw + deltaY * sinYaw;
+            const localY = -deltaX * sinYaw + deltaY * cosYaw;
+
+            const originalPixelX = localX / resolution;
+            const originalPixelY = Number(mapInfo.height) - localY / resolution;
+
+            return {
+                x: originalPixelX - Number(mapInfo.preview_offset_x || 0),
+                y: originalPixelY - Number(mapInfo.preview_offset_y || 0)
+            };
+        }
+
+        function updateRealtimeMarker() {
+            const payload = monitorState.latestPayload;
+            const mapInfo = viewerState.currentMap;
+
+            if (!payload || !mapInfo) {
+                hideCarMarker();
+                return;
+            }
+
+            if (payload.longitude == null || payload.latitude == null) {
+                hideCarMarker();
+                return;
+            }
+
+            const { x, y } = worldToPreviewPixel(mapInfo, payload.longitude, payload.latitude);
+            const previewWidth = Number(mapInfo.preview_width || 0);
+            const previewHeight = Number(mapInfo.preview_height || 0);
+
+            if (x < 0 || y < 0 || x > previewWidth || y > previewHeight) {
+                hideCarMarker();
+                return;
+            }
+
+            const label = monitorState.activeCarName
+                ? `${monitorState.activeCarName} (#${payload.car_id})`
+                : `车辆 #${payload.car_id}`;
+            setCarMarker(x, y, Number(payload.yaw || 0), label);
+        }
+
         function showMap(data) {
             viewerState.currentMap = data;
             dom.emptyState.style.display = "none";
             dom.mapImage.src = data.preview_url;
-            dom.mapImage.onload = () => fitMapToStage();
+            dom.mapImage.onload = () => {
+                fitMapToStage();
+                updateRealtimeMarker();
+            };
             renderMetadata(data);
             renderLinks(data);
             renderJson(data);
@@ -688,23 +1048,6 @@
             }
         }
 
-        function mapPixelToWorld(mapInfo, pixelX, pixelY) {
-            const resolution = Number(mapInfo.resolution);
-            const yaw = Number(mapInfo.origin_yaw || 0);
-            const originalPixelX = pixelX + Number(mapInfo.preview_offset_x || 0);
-            const originalPixelY = pixelY + Number(mapInfo.preview_offset_y || 0);
-            const localX = originalPixelX * resolution;
-            const localY = (mapInfo.height - originalPixelY) * resolution;
-
-            const cosYaw = Math.cos(yaw);
-            const sinYaw = Math.sin(yaw);
-
-            const worldX = mapInfo.origin_x + localX * cosYaw - localY * sinYaw;
-            const worldY = mapInfo.origin_y + localX * sinYaw + localY * cosYaw;
-
-            return { worldX, worldY };
-        }
-
         function inspectAt(clientX, clientY) {
             if (!viewerState.currentMap) {
                 return;
@@ -735,6 +1078,110 @@
                 世界坐标: (${worldX.toFixed(3)}, ${worldY.toFixed(3)})<br>
                 当前缩放: ${viewerState.scale.toFixed(3)}x
             `;
+        }
+
+        function clearReconnectTimer() {
+            if (monitorState.reconnectTimer) {
+                clearTimeout(monitorState.reconnectTimer);
+                monitorState.reconnectTimer = null;
+            }
+        }
+
+        function disconnectWebSocket(updateStatus = true) {
+            monitorState.manualClose = true;
+            clearReconnectTimer();
+
+            if (monitorState.socket) {
+                monitorState.socket.close();
+                monitorState.socket = null;
+            }
+
+            if (updateStatus) {
+                setStatus(dom.wsStatus, "websocket 已断开。", "");
+            }
+        }
+
+        function scheduleReconnect() {
+            clearReconnectTimer();
+            if (monitorState.manualClose || !monitorState.activeCarId) {
+                return;
+            }
+
+            setStatus(dom.wsStatus, `连接断开，${monitorState.reconnectDelayMs / 1000} 秒后自动重连...`, "error");
+            monitorState.reconnectTimer = window.setTimeout(() => {
+                connectWebSocket(true);
+            }, monitorState.reconnectDelayMs);
+        }
+
+        function handleRealtimeMessage(payload) {
+            monitorState.latestPayload = payload;
+            renderLiveData(payload);
+            updateRealtimeMarker();
+            addLog(`收到实时状态：car_id=${payload.car_id}，speed=${payload.speed ?? "-"}，reported_at=${payload.reported_at ?? "-"}`);
+        }
+
+        function connectWebSocket(isReconnect = false) {
+            const serverUrl = normalizeServerUrl();
+            const carId = dom.carId.value.trim();
+
+            if (!serverUrl) {
+                setStatus(dom.wsStatus, "请先填写后端地址。", "error");
+                return;
+            }
+
+            if (!carId) {
+                setStatus(dom.wsStatus, "请先选择或填写车 ID。", "error");
+                return;
+            }
+
+            disconnectWebSocket(false);
+            monitorState.manualClose = false;
+            monitorState.activeCarId = carId;
+
+            const selectedOption = dom.carSelect.selectedOptions[0];
+            monitorState.activeCarName = selectedOption?.dataset?.name || "";
+
+            let wsUrl = "";
+            try {
+                wsUrl = normalizeWebSocketUrl(serverUrl, carId);
+            } catch (error) {
+                setStatus(dom.wsStatus, `后端地址格式不正确：${error.message}`, "error");
+                return;
+            }
+
+            setStatus(dom.wsStatus, `${isReconnect ? "正在重连" : "正在连接"} websocket...`);
+            addLog(`${isReconnect ? "开始重连" : "开始连接"} ${wsUrl}`);
+
+            const socket = new WebSocket(wsUrl);
+            monitorState.socket = socket;
+
+            socket.onopen = () => {
+                clearReconnectTimer();
+                setStatus(dom.wsStatus, `websocket 已连接：车辆 #${carId}`, "success");
+                addLog(`websocket 连接成功，正在监控车辆 #${carId}`);
+            };
+
+            socket.onmessage = (event) => {
+                try {
+                    const payload = JSON.parse(event.data);
+                    handleRealtimeMessage(payload);
+                } catch (error) {
+                    addLog(`收到无法解析的 websocket 消息：${error.message}`);
+                }
+            };
+
+            socket.onerror = () => {
+                setStatus(dom.wsStatus, "websocket 连接发生错误，请检查后端日志。", "error");
+                addLog("websocket 出现错误");
+            };
+
+            socket.onclose = () => {
+                if (monitorState.socket === socket) {
+                    monitorState.socket = null;
+                }
+                addLog("websocket 已关闭");
+                scheduleReconnect();
+            };
         }
 
         dom.uploadForm.addEventListener("submit", async (event) => {
@@ -781,6 +1228,7 @@
         });
 
         dom.refreshBtn.addEventListener("click", fetchMapsList);
+        dom.refreshCarsBtn.addEventListener("click", fetchCarsList);
 
         dom.loadBtn.addEventListener("click", async () => {
             await loadSelectedMap(dom.mapSelect.value);
@@ -789,6 +1237,22 @@
         dom.resetViewBtn.addEventListener("click", () => {
             fitMapToStage();
             setStatus(dom.browserStatus, "视图已重置到适合窗口的大小。", "success");
+        });
+
+        dom.carSelect.addEventListener("change", () => {
+            dom.carId.value = dom.carSelect.value;
+        });
+
+        dom.connectWsBtn.addEventListener("click", () => {
+            connectWebSocket(false);
+        });
+
+        dom.disconnectWsBtn.addEventListener("click", () => {
+            disconnectWebSocket(true);
+        });
+
+        dom.clearLogBtn.addEventListener("click", () => {
+            resetMonitorUi();
         });
 
         dom.viewerStage.addEventListener("wheel", (event) => {
@@ -867,7 +1331,9 @@
             }
         });
 
+        resetMonitorUi();
         fetchMapsList();
+        fetchCarsList();
     </script>
 </body>
 </html>

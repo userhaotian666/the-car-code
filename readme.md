@@ -6,20 +6,46 @@ SQLALCHEMY_DATABASE_URL = "mysql+aiomysql://root:Cqc114514!@192.168.31.64/Car_da
 ```
 后端启动后如果数据库中没有表会自动建表
 
+## `cars` 表升级
+如果数据库里已经有旧版 `cars` 表，需要先手动补 `ip_address`、`work_status` 字段和唯一索引，再启动后端：
+
+```sql
+ALTER TABLE cars ADD COLUMN ip_address VARCHAR(45) NULL COMMENT '小车IP地址';
+ALTER TABLE cars ADD COLUMN work_status SMALLINT NULL COMMENT '车辆工作状态';
+-- 为现有车辆补齐唯一 IP 后，再执行：
+ALTER TABLE cars MODIFY COLUMN ip_address VARCHAR(45) NOT NULL COMMENT '小车IP地址';
+CREATE UNIQUE INDEX uq_cars_ip_address ON cars (ip_address);
+```
+
 ## `car_history` 表升级
-如果数据库里已经有旧版 `car_history` 表，需要先手动补两个字段再启动后端：
+如果数据库里已经有旧版 `car_history` 表，需要先手动补三个字段再启动后端：
 
 ```sql
 ALTER TABLE car_history ADD COLUMN yaw FLOAT NULL COMMENT '相对地图原点的朝向(度)';
 ALTER TABLE car_history ADD COLUMN mode SMALLINT NULL COMMENT '模式: 1-遥控, 2-自主导航';
+ALTER TABLE car_history ADD COLUMN work_status SMALLINT NULL COMMENT '小车工作状态';
 ```
 
 说明：
 
+- `cars.ip_address` 现在是小车 MQTT 唯一标识
 - `longitude` 现在承载地图相对 `x` 坐标
 - `latitude` 现在承载地图相对 `y` 坐标
 - `gear` 不入库
 - `mode`：`1=遥控`，`2=自主导航`
+- `cars.status` / `car_history.car_status` 统一采用：
+  - `0=待机`
+  - `1=充电执行中`
+  - `2=任务执行中`
+  - `3=任务完成返回中`
+  - `4=异常状态`
+- `cars.work_status` / `car_history.work_status` 表示车辆工作状态，直接跟随车辆状态 topic 实时更新
+- `cars.status` 只会由车辆 MQTT 真实上报更新，任务接口不会直接改写车辆状态
+- 车辆状态上报 topic：`car/{car_ip}/status`
+- 任务状态上报 topic：`car/{car_ip}/task/report`
+- `tasks.status` 由 `task/report` 上报更新，不再从 `work_status` 推导
+- 路径下发 topic：`car/{car_ip}/task/path`
+- 任务控制命令下发 topic：`car/{car_ip}/task/cmd`
 
 # 开启后端接口
 在终端内输入：uvicorn main:app --host 0.0.0.0 --port 8000 --reload

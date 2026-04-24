@@ -6,6 +6,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship,validates
 from database import Base
+from car_status import CarStatus
 
 # 使用 TYPE_CHECKING 避免循环导入
 if TYPE_CHECKING:
@@ -69,7 +70,7 @@ class Path(Base):
     
     id: Mapped[int] = mapped_column(primary_key=True, comment="任务ID/路径ID")
     name: Mapped[str] = mapped_column(String(100), nullable=False, comment="名字")
-    waypoints: Mapped[list] = mapped_column(JSON, nullable=False, comment="路径坐标点集合")
+    waypoints: Mapped[list] = mapped_column(JSON, nullable=False, comment="路径坐标点集合，格式为 [[x, y], ...]")
 
 # ================= 3. 任务表 (Task) =================
 class Task(Base):
@@ -132,9 +133,19 @@ class Car(Base):
     
     id: Mapped[int] = mapped_column(primary_key=True, comment="小车ID")
     name: Mapped[str] = mapped_column(String(50), nullable=False)
+    ip_address: Mapped[str] = mapped_column(String(45), nullable=False, unique=True, comment="小车IP地址")
     
     current_task_id: Mapped[Optional[int]] = mapped_column(ForeignKey("tasks.id"))
-    status: Mapped[int] = mapped_column(SmallInteger, default=0)
+    status: Mapped[int] = mapped_column(
+        SmallInteger,
+        default=CarStatus.STANDBY.value,
+        comment="车辆状态: 0-待机, 1-充电执行中, 2-任务执行中, 3-任务完成返回中, 4-异常状态",
+    )
+    work_status: Mapped[Optional[int]] = mapped_column(
+        SmallInteger,
+        nullable=True,
+        comment="车辆工作状态，由车端状态上报实时更新",
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
 
     current_task: Mapped["Task"] = relationship(
@@ -223,6 +234,7 @@ class CarHistory(Base):
     
     mode: Mapped[Optional[int]] = mapped_column(SmallInteger, comment="模式: 1-遥控, 2-自主导航")
     car_status: Mapped[Optional[int]] = mapped_column(SmallInteger, comment="小车状态")
+    work_status: Mapped[Optional[int]] = mapped_column(SmallInteger, comment="小车工作状态")
     reported_at: Mapped[datetime] = mapped_column(DateTime(timezone=False), default=datetime.now, nullable=False, comment="上报时间")
 
     __table_args__ = (

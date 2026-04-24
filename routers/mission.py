@@ -4,16 +4,12 @@ from sqlalchemy.orm import selectinload
 from sqlalchemy import select
 from typing import List
 
+from car_runtime import get_assignment_block_reason, get_effective_car_status
 from database import get_db
-from model import Car, Task, Path
+from model import Car, Task, Path, TaskStatus
 from schemas import MissionCreateRequest
 
 router = APIRouter(prefix="/missions", tags=["Missions"])
-
-# 状态常量定义 (建议统一放在模型或单独的常量文件中)
-STATUS_FAULT = 0   # 故障
-STATUS_STANDBY = 1 # 待机
-STATUS_RUNNING = 2 # 运行
 
 # ==========================================
 # 1. 任务下发 (Dispatch)
@@ -21,19 +17,23 @@ STATUS_RUNNING = 2 # 运行
 @router.post("/dispatch", status_code=status.HTTP_201_CREATED, summary="下发任务并指派车辆")
 async def dispatch_mission(request: MissionCreateRequest, db: AsyncSession = Depends(get_db)):
     # 1. 获取车辆并检查状态
-    car = await db.get(Car, request.car_id)
+    stmt = (
+        select(Car)
+        .options(selectinload(Car.current_task))
+        .where(Car.id == request.car_id)
+    )
+    result = await db.execute(stmt)
+    car = result.scalars().first()
     if not car:
         raise HTTPException(status_code=404, detail=f"找不到 ID 为 {request.car_id} 的车辆")
 
-    # 逻辑校验：只有待机车辆能接单
-    if car.status == STATUS_FAULT:
-        raise HTTPException(status_code=400, detail="该车辆处于故障状态，无法下发任务")
-    if car.status == STATUS_RUNNING:
-        raise HTTPException(status_code=400, detail="该车辆正在执行其他任务，请稍后再试")
+    block_reason = get_assignment_block_reason(car)
+    if block_reason:
+        raise HTTPException(status_code=400, detail=block_reason)
 
     # 2. 异步创建路径记录
     # model_dump 将 Pydantic 列表转为 Python 列表，以便存入 JSON 字段
-    waypoints_data = [p.model_dump() for p in request.waypoints]
+    waypoints_data = [[float(p.lat), float(p.lng)] for p in request.waypoints]
     
     new_path = Path(
         name=f"{request.name}_Path", 
@@ -47,14 +47,13 @@ async def dispatch_mission(request: MissionCreateRequest, db: AsyncSession = Dep
     new_task = Task(
         name=request.name, 
         path_id=new_path.id, 
-        status=0 # 初始状态：未开始
+        status=TaskStatus.PENDING,
     )
     db.add(new_task)
     await db.flush() # 拿到 task.id
 
-    # 4. 更新车辆状态并关联任务
+    # 4. 仅建立车辆与任务的绑定关系，车辆状态保持由车端真实上报驱动
     car.current_task_id = new_task.id
-    car.status = STATUS_RUNNING 
     
     # 5. 统一提交事务
     await db.commit()
@@ -97,6 +96,10 @@ async def get_task_executor(task_id: int, db: AsyncSession = Depends(get_db)):
         "executor": {
             "car_id": task.executor.id,
             "car_name": task.executor.name,
-            "car_status": task.executor.status
+            "car_status": await get_effective_car_status(
+                db,
+                task.executor.id,
+                task.executor.status,
+            ),
         }
     }

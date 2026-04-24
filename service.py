@@ -4,17 +4,15 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from sqlalchemy import select, and_, or_
 from sqlalchemy.orm import selectinload
 
+from car_runtime import get_start_block_reason
 # 导入你的配置
 from database import AsyncSessionLocal
-from model import Task, TaskStatus, Car # 假设你定义了 CarStatus
+from model import Car, Task, TaskStatus
 
 # 配置日志
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("scheduler")
 logging.getLogger("apscheduler").setLevel(logging.WARNING)
-CAR_FAULT = 0
-CAR_STANDBY = 1
-CAR_RUNNING = 2
 scheduler = AsyncIOScheduler()
 
 async def check_and_start_due_tasks():
@@ -31,7 +29,9 @@ async def check_and_start_due_tasks():
         # - 是定时任务 (is_scheduled = True)
         # - 状态是等待中 (status = SCHEDULED)
         # - 设定时间 <= 当前时间 (scheduled_start <= now)
-        stmt = select(Task).options(selectinload(Task.executor)).where(
+        stmt = select(Task).options(
+            selectinload(Task.executor).selectinload(Car.current_task)
+        ).where(
             and_(
                 Task.is_scheduled == True,
                 Task.scheduled_start <= current_time,
@@ -61,19 +61,14 @@ async def check_and_start_due_tasks():
                 # 可以在这里加逻辑：如果没车，是否要把状态改为 PENDING 让调度器去分配？
                 # task.status = TaskStatus.PENDING 
                 continue
-            
-            if task.executor.status == 0: # 假设 0 是故障
-                 logger.error(f"❌ 任务 {task.id} 车辆故障，无法启动")
-                 # task.status = TaskStatus.FAILED # 可选：标记失败
-                 continue
 
-            if task.executor.status == 2 and task.executor.current_task_id != task.id:
-                 logger.warning(f"⚠️ 任务 {task.id} 车辆正在忙其他任务，稍后重试")
-                 continue
+            block_reason = get_start_block_reason(task.executor, task.id)
+            if block_reason:
+                logger.warning(f"⚠️ 任务 {task.id} 无法自动启动: {block_reason}")
+                continue
 
             # B. 正式启动
             task.status = TaskStatus.RUNNING
-            task.executor.status = 2 # CAR_RUNNING
             
             # 可选：记录实际开始时间
             # task.actual_start_at = datetime.now()

@@ -1,22 +1,45 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession  # 1. 改变 Session 类型
 from sqlalchemy.orm import selectinload
-from typing import List
+from typing import List, Optional
 from sqlalchemy import select
 
+from car_status import CarStatus
+from car_runtime import get_effective_car_status
 # 导入你的 schema 和 model
 from schemas import CarCreate, CarRead, CarUpdate
 from database import get_db
-from model import Car, Device ,CarHistory
-from CRUD import get_latest_car_status_async  # 导入异步查询函数
+from model import Car, Device
 router = APIRouter(prefix="/cars", tags=["Cars"])
+
+
+async def _get_car_by_ip(db: AsyncSession, ip_address: str) -> Optional[Car]:
+    stmt = select(Car).where(Car.ip_address == ip_address)
+    result = await db.execute(stmt)
+    return result.scalars().first()
+
+
+async def _build_car_read(db: AsyncSession, car: Car) -> CarRead:
+    car_read = CarRead.model_validate(car)
+    car_read.status = await get_effective_car_status(db, car.id, car.status)
+    return car_read
 
 # ==========================================
 # 1. 创建小车 (Create) - 异步版
 # ==========================================
 @router.post("/", response_model=CarRead, status_code=status.HTTP_201_CREATED)
 async def create_car(car: CarCreate, db: AsyncSession = Depends(get_db)): # async def
+    car_ip = car.ip_address.strip()
+    if not car_ip:
+        raise HTTPException(status_code=400, detail="Car IP is required")
+    existing_car = await _get_car_by_ip(db, car_ip)
+    if existing_car:
+        raise HTTPException(status_code=400, detail="Car IP already exists")
+
     db_car = Car(**car.model_dump())
+    db_car.ip_address = car_ip
+    db_car.status = CarStatus.STANDBY.value
+    db_car.work_status = None
     
     db.add(db_car)
     await db.commit()   # 2. 加上 await
@@ -53,7 +76,7 @@ async def read_car(car_id: int, db: AsyncSession = Depends(get_db)):
     
     if car is None:
         raise HTTPException(status_code=404, detail="Car not found")
-    return car
+    return await _build_car_read(db, car)
 
 @router.get("/{car_id}/status", response_model=CarRead)
 async def read_car_status(car_id: int, db: AsyncSession = Depends(get_db)):
@@ -69,24 +92,7 @@ async def read_car_status(car_id: int, db: AsyncSession = Depends(get_db)):
     
     if car is None:
         raise HTTPException(status_code=404, detail="Car not found")
-    
-    # 2. 调用你之前改好的异步查询函数，获取最新的历史状态
-    # 这里的 db 会话是共享的，完全没问题
-    latest_history = await get_latest_car_status_async(db, car_id)
-    
-    if latest_history:
-        # 注意：这里是将历史表的数据临时“挂载”到小车对象上返回给前端
-        # 确保你的 CarRead Schema 中定义了 status 和 last_update 字段
-        
-        # 加上 is not None 的判断，明确排除 None 的情况，完美解决 Pylance 报错
-        if latest_history.car_status is not None:
-            car.status = latest_history.car_status
-        else:
-            # 可选：如果历史记录里的状态碰巧是 None，你可以让它保持小车原本的状态，或者给个默认值比如 0
-            pass 
-            # car.status = 0
-    
-    return car
+    return await _build_car_read(db, car)
 # ==========================================
 # 4. 更新小车 (Update)
 # ==========================================
@@ -100,12 +106,26 @@ async def update_car(car_id: int, car_update: CarUpdate, db: AsyncSession = Depe
         raise HTTPException(status_code=404, detail="Car not found")
     
     update_data = car_update.model_dump(exclude_unset=True)
+    if "status" in update_data:
+        raise HTTPException(status_code=400, detail="车辆状态只能由车端真实上报更新")
+    if "work_status" in update_data:
+        raise HTTPException(status_code=400, detail="车辆工作状态只能由车端真实上报更新")
+
+    if "ip_address" in update_data and update_data["ip_address"] is not None:
+        new_ip = update_data["ip_address"].strip()
+        if not new_ip:
+            raise HTTPException(status_code=400, detail="Car IP is required")
+        existing_car = await _get_car_by_ip(db, new_ip)
+        if existing_car and existing_car.id != car_id:
+            raise HTTPException(status_code=400, detail="Car IP already exists")
+        update_data["ip_address"] = new_ip
+
     for key, value in update_data.items():
         setattr(db_car, key, value)
     
     await db.commit() # await
     await db.refresh(db_car) # await
-    return db_car
+    return await _build_car_read(db, db_car)
 
 # ==========================================
 # 5. 删除小车 (Delete)
@@ -165,4 +185,3 @@ async def unbind_device_from_car(car_id: int, device_id: int, db: AsyncSession =
     await db.commit() # await
     
     return {"message": "Success", "success": True}
-

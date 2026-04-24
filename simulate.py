@@ -6,6 +6,7 @@ from sqlalchemy import select, desc, or_
 from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from car_status import CarStatus
 # ================= 📦 项目依赖 =================
 # 确保 database.py 中导出了 AsyncSessionLocal
 from database import AsyncSessionLocal
@@ -49,6 +50,16 @@ class VirtualCarDriver:
         self.current_speed = 0.0
         self.current_temp = AMBIENT_TEMP
         self.current_signal = 100
+
+    @staticmethod
+    def _waypoint_to_xy(point) -> tuple[float, float]:
+        if isinstance(point, (list, tuple)) and len(point) == 2:
+            return float(point[0]), float(point[1])
+        if isinstance(point, dict):
+            x = point.get("x", point.get("lng", 0.0))
+            y = point.get("y", point.get("lat", 0.0))
+            return float(x), float(y)
+        return 0.0, 0.0
 
     async def run_loop(self):
         """仿真主循环"""
@@ -138,9 +149,9 @@ class VirtualCarDriver:
                 else:
                     # --- 新任务模式 ---
                     logger.info(f"🆕 [Car-{self.car_id}] 新任务启动，重置到起点")
-                    # ✨ 确保取到的 waypoint 数据有效
-                    self.current_lat = float(start_point.get("lat", 0.0))
-                    self.current_lng = float(start_point.get("lng", 0.0))
+                    start_x, start_y = self._waypoint_to_xy(start_point)
+                    self.current_lat = start_x
+                    self.current_lng = start_y
                     self.current_path_index = 0
                     self.segment_progress = 0.0
                     self.moving_forward = True
@@ -180,13 +191,17 @@ class VirtualCarDriver:
         safe_lat = float(self.current_lat)
         safe_lng = float(self.current_lng)
         safe_speed = float(self.current_speed)
+        simulated_car_status = (
+            CarStatus.STANDBY.value if is_paused else CarStatus.EXECUTING.value
+        )
         
         history = CarHistory(
             car_id=car.id,
             battery=safe_battery,
             longitude=safe_lng,
             latitude=safe_lat,
-            car_status=current_status_val, # 使用当前的任务状态数值
+            # 仿真模式只产出模拟历史，不直接驱动 cars.status。
+            car_status=simulated_car_status,
             reported_at=datetime.now(),
             speed=round(safe_speed, 1),
             temperature=round(self.current_temp, 1),
@@ -202,8 +217,7 @@ class VirtualCarDriver:
         closest_index = 0
         
         for i, wp in enumerate(waypoints):
-            wp_lat = float(wp.get("lat", 0.0))
-            wp_lng = float(wp.get("lng", 0.0))
+            wp_lat, wp_lng = self._waypoint_to_xy(wp)
             dist = (wp_lat - car_lat) ** 2 + (wp_lng - car_lng) ** 2
             if dist < min_dist:
                 min_dist = dist
@@ -254,10 +268,8 @@ class VirtualCarDriver:
         p_to   = waypoints[target_index]
         self.segment_progress += MOVE_SPEED_RATIO
 
-        lat_f = float(p_from.get("lat", 0.0))
-        lng_f = float(p_from.get("lng", 0.0))
-        lat_t = float(p_to.get("lat", 0.0))
-        lng_t = float(p_to.get("lng", 0.0))
+        lat_f, lng_f = self._waypoint_to_xy(p_from)
+        lat_t, lng_t = self._waypoint_to_xy(p_to)
 
         if self.segment_progress >= 1.0:
             self.segment_progress = 0.0
@@ -275,21 +287,17 @@ class VirtualCarDriver:
         # 1. 更新任务状态
         task.status = TaskStatus.COMPLETED
         task.finished_at = datetime.now()
-        
-        # 2. 如果 Car 表有 status 字段，可在此释放
-        if hasattr(car, "status"):
-             car.status = 1  # STANDBY
-        
-        # 3. 速度归零
+
+        # 2. 速度归零
         self.current_speed = 0.0
         
-        # 4. 插入最后一条记录 (确保速度为0，位置定格)
+        # 3. 插入最后一条记录 (确保速度为0，位置定格)
         final_history = CarHistory(
             car_id=car.id,
             battery=int(self.current_battery),
             longitude=float(self.current_lat), # 保证 Float
             latitude=float(self.current_lng),  # 保证 Float
-            car_status=1,                      # 这里的状态码看你定义，假设 1=Standby
+            car_status=CarStatus.STANDBY.value,
             reported_at=datetime.now(),
             speed=0.0,                         # 明确为 0
             temperature=round(self.current_temp, 1),

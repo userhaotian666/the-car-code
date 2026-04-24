@@ -1,8 +1,8 @@
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 from sqlalchemy.orm import DeclarativeBase
 
-SQLALCHEMY_DATABASE_URL = "mysql+aiomysql://root:Cqc114514!@192.168.1.101/Car_data"
-#SQLALCHEMY_DATABASE_URL = "mysql+aiomysql://root:xhtxht0715@localhost/data"
+#SQLALCHEMY_DATABASE_URL = "mysql+aiomysql://root:Cqc114514!@192.168.1.101/Car_data"
+SQLALCHEMY_DATABASE_URL = "mysql+aiomysql://root:xhtxht0715@localhost/data"
 
 # 2. 创建异步引擎
 engine = create_async_engine(

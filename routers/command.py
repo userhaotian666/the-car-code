@@ -5,6 +5,7 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException, Depends
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from car_status import CarStatus
 # 导入你的 database 配置
 from database import AsyncSessionLocal, get_db
 # 导入你的模型
@@ -107,7 +108,8 @@ async def simulate_return_trip(command_id: int, car_id: int):
                     latitude=round(curr_y, 7),
                     yaw=round(route_yaw, 2),
                     mode=2,
-                    car_status=2, 
+                    # 返航仅写入开发联调用的模拟历史状态，不直接修改 cars.status。
+                    car_status=CarStatus.RETURNING.value,
                     reported_at=datetime.now()
                 )
                 
@@ -124,7 +126,7 @@ async def simulate_return_trip(command_id: int, car_id: int):
                 latitude=base_station_y,
                 yaw=round(route_yaw, 2),
                 mode=2,
-                car_status=0,
+                car_status=CarStatus.STANDBY.value,
                 reported_at=datetime.now()
             )
             db.add(final_fix)

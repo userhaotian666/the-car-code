@@ -55,6 +55,10 @@ def validate_car_history_table_schema(sync_conn) -> None:
         sql_statements.append(
             "ALTER TABLE car_history ADD COLUMN mode SMALLINT NULL COMMENT '模式: 1-遥控, 2-自主导航';"
         )
+    if "work_status" in missing_columns:
+        sql_statements.append(
+            "ALTER TABLE car_history ADD COLUMN work_status SMALLINT NULL COMMENT '小车工作状态';"
+        )
 
     sql_hint = "\n".join(sql_statements) if sql_statements else "请根据最新模型手动补齐 car_history 缺失列。"
     raise RuntimeError(
@@ -65,12 +69,59 @@ def validate_car_history_table_schema(sync_conn) -> None:
     )
 
 
+def validate_car_table_schema(sync_conn) -> None:
+    inspector = inspect(sync_conn)
+    if "cars" not in inspector.get_table_names():
+        return
+
+    columns = inspector.get_columns("cars")
+    existing_columns = {column["name"] for column in columns}
+    if "ip_address" not in existing_columns:
+        raise RuntimeError(
+            "检测到 cars 表缺少字段: ip_address。\n"
+            "请先执行以下 SQL 更新数据库后再重新启动服务：\n"
+            "ALTER TABLE cars ADD COLUMN ip_address VARCHAR(45) NULL COMMENT '小车IP地址';\n"
+            "-- 为现有车辆补齐唯一 IP 后，再执行：\n"
+            "ALTER TABLE cars MODIFY COLUMN ip_address VARCHAR(45) NOT NULL COMMENT '小车IP地址';\n"
+            "CREATE UNIQUE INDEX uq_cars_ip_address ON cars (ip_address);"
+        )
+
+    ip_column = next((column for column in columns if column["name"] == "ip_address"), None)
+    if ip_column and ip_column.get("nullable", True):
+        raise RuntimeError(
+            "检测到 cars.ip_address 仍允许为空。\n"
+            "请先执行以下 SQL 更新数据库后再重新启动服务：\n"
+            "ALTER TABLE cars MODIFY COLUMN ip_address VARCHAR(45) NOT NULL COMMENT '小车IP地址';"
+        )
+
+    unique_constraints = inspector.get_unique_constraints("cars")
+    unique_indexes = inspector.get_indexes("cars")
+    has_ip_unique = any(constraint.get("column_names") == ["ip_address"] for constraint in unique_constraints) or any(
+        index.get("unique") and index.get("column_names") == ["ip_address"] for index in unique_indexes
+    )
+
+    if not has_ip_unique:
+        raise RuntimeError(
+            "检测到 cars.ip_address 尚未建立唯一约束。\n"
+            "请先执行以下 SQL 更新数据库后再重新启动服务：\n"
+            "CREATE UNIQUE INDEX uq_cars_ip_address ON cars (ip_address);"
+        )
+
+    if "work_status" not in existing_columns:
+        raise RuntimeError(
+            "检测到 cars 表缺少字段: work_status。\n"
+            "请先执行以下 SQL 更新数据库后再重新启动服务：\n"
+            "ALTER TABLE cars ADD COLUMN work_status SMALLINT NULL COMMENT '车辆工作状态';"
+        )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # --- 服务启动阶段 ---
     async with engine.begin() as conn:
         await conn.run_sync(validate_map_table_schema)
         await conn.run_sync(validate_car_history_table_schema)
+        await conn.run_sync(validate_car_table_schema)
         # run_sync 是关键，它允许在异步连接中执行同步的 SQLAlchemy 命令
         await conn.run_sync(Base.metadata.create_all)
     

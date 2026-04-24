@@ -10,8 +10,10 @@ MQTT_BROKER = os.getenv("MQTT_BROKER", "broker.emqx.io")
 MQTT_PORT = int(os.getenv("MQTT_PORT", "1883"))
 MQTT_USER = os.getenv("MQTT_USER", "hz_xulan")
 MQTT_PW = os.getenv("MQTT_PW", "xunlan123456")
-DEVICE_ID = os.getenv("MQTT_DEVICE_ID", "001")
-MQTT_TOPIC = os.getenv("MQTT_TOPIC", f"car/{DEVICE_ID}/status")
+CAR_IP = os.getenv("MQTT_CAR_IP", "10.168.1.100")
+MQTT_TOPIC = os.getenv("MQTT_TOPIC", f"car/{CAR_IP}/status")
+MQTT_MISSION_REPORT_TOPIC = os.getenv("MQTT_MISSION_REPORT_TOPIC", f"car/{CAR_IP}/task/report")
+TASK_ID = int(os.getenv("MQTT_TASK_ID", "1"))
 
 
 def on_connect(client, userdata, flags, rc):
@@ -21,7 +23,7 @@ def on_connect(client, userdata, flags, rc):
         print(f"❌ 连接失败，返回码: {rc}")
 
 
-def build_payload(step: int) -> dict:
+def build_status_payload(step: int) -> dict:
     angle = step / 5
     speed = round(max(0.0, 0.6 * math.sin(step / 4) + random.uniform(-0.05, 0.05)), 2)
     battery = max(0, 100 - step // 6)
@@ -33,26 +35,40 @@ def build_payload(step: int) -> dict:
     yaw = round((math.degrees(angle) + 360) % 360, 2)
 
     return {
-        "msg_id": f"state_{timestamp}_{random.randint(1000, 9999)}",
-        "version": "1.0",
+        "car_ip": CAR_IP,
         "timestamp": timestamp,
-        "device_id": DEVICE_ID,
-        "data": {
-            "battery": battery,
-            "speed": speed,
-            "gear": gear,
-            "mode": mode,
-            "location": {
-                "x": x,
-                "y": y,
-                "yaw": yaw,
-            },
-        },
+        "longitude": x,
+        "latitude": y,
+        "yaw": yaw,
+        "speed": speed,
+        "mode": mode,
+        "car_status": random.choice([0, 2, 3]),
+        "work_status": random.choice([0, 1, 3, 4]),
+        "battery": battery,
+        "gear": gear,
+    }
+
+
+def build_mission_report_payload(step: int) -> dict:
+    timestamp = int(time.time())
+    phase = step % 12
+    if phase < 3:
+        task_status = 0
+    elif phase < 9:
+        task_status = 1
+    else:
+        task_status = 2
+
+    return {
+        "timestamp": timestamp,
+        "car_id": CAR_IP,
+        "task_id": TASK_ID,
+        "task_status": task_status,
     }
 
 
 def main():
-    client = mqtt.Client(client_id=f"Mock_Car_{DEVICE_ID}")
+    client = mqtt.Client(client_id=f"Mock_Car_{CAR_IP}")
     client.username_pw_set(MQTT_USER, MQTT_PW)
     client.on_connect = on_connect
 
@@ -65,10 +81,16 @@ def main():
 
     try:
         while True:
-            payload = build_payload(step)
-            payload_text = json.dumps(payload, ensure_ascii=False)
-            client.publish(MQTT_TOPIC, payload_text)
-            print(f"[发布] Topic: {MQTT_TOPIC} | Payload: {payload_text}")
+            status_payload = build_status_payload(step)
+            status_payload_text = json.dumps(status_payload, ensure_ascii=False)
+            client.publish(MQTT_TOPIC, status_payload_text)
+            print(f"[发布] Topic: {MQTT_TOPIC} | Payload: {status_payload_text}")
+
+            mission_payload = build_mission_report_payload(step)
+            mission_payload_text = json.dumps(mission_payload, ensure_ascii=False)
+            client.publish(MQTT_MISSION_REPORT_TOPIC, mission_payload_text)
+            print(f"[发布] Topic: {MQTT_MISSION_REPORT_TOPIC} | Payload: {mission_payload_text}")
+
             step += 1
             time.sleep(1)
     except KeyboardInterrupt:

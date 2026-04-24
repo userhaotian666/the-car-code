@@ -11,6 +11,7 @@ class CarSummary(BaseModel):
     id: int
     name: str
     status: int  # 只带最关键的状态
+    work_status: Optional[int] = None
     
     model_config = orm_config
 
@@ -38,6 +39,7 @@ class CarSimple(BaseModel):
     id: int
     name: str
     status: int
+    work_status: Optional[int] = None
 
     class Config:
         from_attributes = True

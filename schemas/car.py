@@ -3,18 +3,23 @@ from pydantic import BaseModel, ConfigDict, Field
 from typing import List, Optional
 from datetime import datetime
 
+from car_status import CarStatus
+
 # 导入摘要模型
 from .common import DeviceSummary
-
-# 小车状态 (沿用你提供的定义)
-CAR_FAULT = 0       # 故障
-CAR_STANDBY = 1     # 待机
-CAR_RUNNING = 2     # 运行中
 
 # --- 基础字段 ---
 class CarBase(BaseModel):
     name: str
-    status: int = 1  # 1-空闲
+    ip_address: str = Field(..., min_length=1, max_length=45, description="小车IP地址")
+    status: int = Field(
+        default=CarStatus.STANDBY.value,
+        description="车辆状态: 0-待机, 1-充电执行中, 2-任务执行中, 3-任务完成返回中, 4-异常状态",
+    )
+    work_status: Optional[int] = Field(
+        default=None,
+        description="车辆工作状态，由车端状态上报实时更新",
+    )
     
 # --- 1. 创建模型 ---
 class CarCreate(CarBase):
@@ -25,7 +30,15 @@ class CarCreate(CarBase):
 # --- 2. 更新模型 ---
 class CarUpdate(BaseModel):
     name: Optional[str] = None
-    status: Optional[int] = None
+    ip_address: Optional[str] = Field(default=None, min_length=1, max_length=45)
+    status: Optional[int] = Field(
+        default=None,
+        description="只读字段，车辆状态只能由车端真实上报更新",
+    )
+    work_status: Optional[int] = Field(
+        default=None,
+        description="只读字段，车辆工作状态只能由车端真实上报更新",
+    )
     current_task_id: Optional[int] = None
 
 class CarRead(CarBase):
@@ -34,6 +47,7 @@ class CarRead(CarBase):
     
     # 使用 Optional 是因为有些新车可能还没有历史状态数据
     status: Optional[int] = None
+    work_status: Optional[int] = None
     
     # 如果你也想在状态接口返回位置和电量，可以继续添加：
     # battery: Optional[int] = None

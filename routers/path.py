@@ -9,6 +9,42 @@ from database import get_db
 
 router = APIRouter(prefix="/paths", tags=["Paths"])
 
+
+def _normalize_waypoint_pairs(raw_waypoints) -> list[list[float]]:
+    if not isinstance(raw_waypoints, list):
+        raise HTTPException(status_code=400, detail="路径点必须是数组，格式为 [[x, y], ...]")
+
+    normalized_waypoints: list[list[float]] = []
+    for index, point in enumerate(raw_waypoints, start=1):
+        if isinstance(point, (list, tuple)) and len(point) == 2:
+            x, y = point
+        elif isinstance(point, dict):
+            x = point.get("x", point.get("lng"))
+            y = point.get("y", point.get("lat"))
+        else:
+            raise HTTPException(status_code=400, detail=f"路径点 #{index} 格式不正确，必须是 [x, y]")
+
+        if x is None or y is None:
+            raise HTTPException(status_code=400, detail=f"路径点 #{index} 缺少坐标")
+
+        try:
+            normalized_waypoints.append([float(x), float(y)])
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail=f"路径点 #{index} 的坐标不是有效数字")
+
+    if not normalized_waypoints:
+        raise HTTPException(status_code=400, detail="路径点不能为空")
+
+    return normalized_waypoints
+
+
+def _serialize_path(path: Path) -> PathRead:
+    return PathRead(
+        id=path.id,
+        name=path.name,
+        waypoints=_normalize_waypoint_pairs(path.waypoints),
+    )
+
 # ==========================================
 # 1. 创建路径 (Create)
 # ==========================================
@@ -18,12 +54,15 @@ async def create_path(path_in: PathCreate, db: AsyncSession = Depends(get_db)):
     接收 JSON 格式的路径点数据并存入数据库。
     waypoints 字段在模型中应为 JSON 类型。
     """
-    db_path = Path(**path_in.model_dump())
+    db_path = Path(
+        name=path_in.name,
+        waypoints=_normalize_waypoint_pairs(path_in.waypoints),
+    )
     db.add(db_path)
     
     await db.commit()    # 👈 异步提交
     await db.refresh(db_path) # 👈 异步刷新以获取 ID
-    return db_path
+    return _serialize_path(db_path)
 
 # ==========================================
 # 2. 查询路径列表 (Read List)
@@ -36,7 +75,7 @@ async def read_paths(skip: int = 0, limit: int = 100, db: AsyncSession = Depends
     stmt = select(Path).offset(skip).limit(limit)
     result = await db.execute(stmt) # 👈 异步执行查询
     
-    return result.scalars().all()
+    return [_serialize_path(path) for path in result.scalars().all()]
 
 # ==========================================
 # 3. 查询单个路径 (Read One)
@@ -47,7 +86,7 @@ async def read_path(path_id: int, db: AsyncSession = Depends(get_db)):
     
     if not db_path:
         raise HTTPException(status_code=404, detail="未找到该路径记录")
-    return db_path
+    return _serialize_path(db_path)
 
 # ==========================================
 # 4. 更新路径 (Update)
@@ -63,12 +102,14 @@ async def update_path(path_id: int, path_update: PathUpdate, db: AsyncSession = 
     
     # exclude_unset=True 确保前端没传的字段不会被置为空
     update_data = path_update.model_dump(exclude_unset=True)
+    if "waypoints" in update_data:
+        update_data["waypoints"] = _normalize_waypoint_pairs(update_data["waypoints"])
     for key, value in update_data.items():
         setattr(db_path, key, value)
 
     await db.commit()
     await db.refresh(db_path)
-    return db_path
+    return _serialize_path(db_path)
 
 # ==========================================
 # 5. 删除路径 (Delete)
