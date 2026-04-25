@@ -30,8 +30,8 @@ def build_status_payload(step: int) -> dict:
     gear = random.choice([1, 2, 3, 4])
     mode = random.choice([1, 2])
     timestamp = int(time.time())
-    x = round(3.5 + math.cos(angle) * 1.2, 3)
-    y = round(5.0 + math.sin(angle) * 1.2, 3)
+    x = round(20.5 + math.cos(angle) * 1.2, 3)
+    y = round(0.1 + math.sin(angle) * 1.2, 3)
     yaw = round((math.degrees(angle) + 360) % 360, 2)
 
     return {

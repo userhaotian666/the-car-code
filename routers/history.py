@@ -56,7 +56,7 @@ async def websocket_car_monitor(
             
             # 3. 频率控制 (让出事件循环，防止死循环卡死服务器)
             # 建议根据你传感器上报的频率调整，比如 0.5 秒或 1 秒
-            await asyncio.sleep(0.5)
+            await asyncio.sleep(1.0)
             
     except WebSocketDisconnect:
         print(f"👋 客户端 {car_id} 已断开连接")

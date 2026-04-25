@@ -3,18 +3,18 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from typing import List
 
-from schemas import PathCreate, PathRead, PathUpdate
+from schemas import PathCreate, PathRead, PathUpdate, PathWaypoint
 from model import Path
 from database import get_db 
 
 router = APIRouter(prefix="/paths", tags=["Paths"])
 
 
-def _normalize_waypoint_pairs(raw_waypoints) -> list[list[float]]:
+def _normalize_waypoint_pairs(raw_waypoints) -> list[PathWaypoint]:
     if not isinstance(raw_waypoints, list):
         raise HTTPException(status_code=400, detail="路径点必须是数组，格式为 [[x, y], ...]")
 
-    normalized_waypoints: list[list[float]] = []
+    normalized_waypoints: list[PathWaypoint] = []
     for index, point in enumerate(raw_waypoints, start=1):
         if isinstance(point, (list, tuple)) and len(point) == 2:
             x, y = point
@@ -28,7 +28,7 @@ def _normalize_waypoint_pairs(raw_waypoints) -> list[list[float]]:
             raise HTTPException(status_code=400, detail=f"路径点 #{index} 缺少坐标")
 
         try:
-            normalized_waypoints.append([float(x), float(y)])
+            normalized_waypoints.append((float(x), float(y)))
         except (TypeError, ValueError):
             raise HTTPException(status_code=400, detail=f"路径点 #{index} 的坐标不是有效数字")
 

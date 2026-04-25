@@ -4,7 +4,7 @@
 供任务路由、调度器等地方复用。
 """
 
-from typing import Optional, Protocol
+from typing import Any, Optional, cast
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -20,48 +20,55 @@ TERMINAL_TASK_STATUSES = {
 }
 
 
-class TaskLike(Protocol):
-    """任务协议类型。
-
-    只声明本模块实际会访问到的字段，方便类型检查器理解“传进来的任务至少要有什么”。
-    """
-    status: int | TaskStatus
-
-
-class CarLike(Protocol):
-    """车辆协议类型。
-
-    同样只声明本模块关心的字段，避免因为 ORM / mock / 简单对象的差异导致 IDE 报错。
-    """
-    status: int
-    current_task_id: Optional[int]
-    current_task: Optional[TaskLike]
-
-
 def _normalize_task_status(value: int | TaskStatus) -> TaskStatus:
     """把 int 或 TaskStatus 统一收敛成 TaskStatus。"""
     return value if isinstance(value, TaskStatus) else TaskStatus(int(value))
 
 
-def task_is_active(task: TaskLike | None) -> bool:
+def _task_status_value(task: Any) -> int | TaskStatus | None:
+    """安全读取任务对象上的 status。"""
+    return cast(int | TaskStatus | None, getattr(task, "status", None))
+
+
+def _car_status_value(car: Any) -> Any:
+    """安全读取车辆对象上的 status。"""
+    return getattr(car, "status", None)
+
+
+def _car_current_task_id(car: Any) -> Optional[int]:
+    """安全读取车辆对象上的 current_task_id。"""
+    return cast(Optional[int], getattr(car, "current_task_id", None))
+
+
+def _car_current_task(car: Any) -> Any:
+    """安全读取车辆对象上的 current_task。"""
+    return getattr(car, "current_task", None)
+
+
+def task_is_active(task: Any) -> bool:
     """判断任务是否仍然处于“活跃中”。"""
     if task is None:
         return False
-    return _normalize_task_status(task.status) not in TERMINAL_TASK_STATUSES
+    status = _task_status_value(task)
+    if status is None:
+        return False
+    return _normalize_task_status(status) not in TERMINAL_TASK_STATUSES
 
 
-def car_has_other_active_task(car: CarLike, current_task_id: Optional[int] = None) -> bool:
+def car_has_other_active_task(car: Any, current_task_id: Optional[int] = None) -> bool:
     """判断车辆是否已经被别的未结束任务占用。"""
-    if car.current_task_id is None:
+    car_current_task_id = _car_current_task_id(car)
+    if car_current_task_id is None:
         return False
 
-    if current_task_id is not None and car.current_task_id == current_task_id:
+    if current_task_id is not None and car_current_task_id == current_task_id:
         return False
 
-    if car.current_task is None:
+    current_task = _car_current_task(car)
+    if current_task is None:
         return True
 
-    return task_is_active(car.current_task)
+    return task_is_active(current_task)
 
 
 def _build_status_message(status: object, action: str) -> str:
@@ -70,16 +77,17 @@ def _build_status_message(status: object, action: str) -> str:
     return f"车辆当前为{label}，无法{action}"
 
 
-def get_assignment_block_reason(car: CarLike) -> Optional[str]:
+def get_assignment_block_reason(car: Any) -> Optional[str]:
     """判断车辆是否允许被指派任务。
 
     返回：
     - None：允许指派
     - str：阻塞原因
     """
-    status = normalize_car_status(car.status)
+    raw_status = _car_status_value(car)
+    status = normalize_car_status(raw_status)
     if status is None:
-        return _build_status_message(car.status, "指派")
+        return _build_status_message(raw_status, "指派")
 
     if status != CarStatus.STANDBY.value:
         return _build_status_message(status, "指派")
@@ -90,11 +98,12 @@ def get_assignment_block_reason(car: CarLike) -> Optional[str]:
     return None
 
 
-def get_start_block_reason(car: CarLike, current_task_id: int) -> Optional[str]:
+def get_start_block_reason(car: Any, current_task_id: int) -> Optional[str]:
     """判断车辆是否允许启动指定任务。"""
-    status = normalize_car_status(car.status)
+    raw_status = _car_status_value(car)
+    status = normalize_car_status(raw_status)
     if status is None:
-        return _build_status_message(car.status, "启动任务")
+        return _build_status_message(raw_status, "启动任务")
 
     if status in {
         CarStatus.CHARGING.value,
@@ -109,14 +118,15 @@ def get_start_block_reason(car: CarLike, current_task_id: int) -> Optional[str]:
     return None
 
 
-def get_unbind_block_reason(car: CarLike, current_task_id: int) -> Optional[str]:
+def get_unbind_block_reason(car: Any, current_task_id: int) -> Optional[str]:
     """判断车辆是否允许从当前任务解绑。"""
     if car_has_other_active_task(car, current_task_id=current_task_id):
         return "车辆已被其他未结束任务占用，无法解绑当前任务"
 
-    status = normalize_car_status(car.status)
+    raw_status = _car_status_value(car)
+    status = normalize_car_status(raw_status)
     if status is None:
-        return _build_status_message(car.status, "解绑")
+        return _build_status_message(raw_status, "解绑")
 
     if status != CarStatus.STANDBY.value:
         return _build_status_message(status, "解绑")
