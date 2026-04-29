@@ -140,7 +140,6 @@ def add_origin_marker(
     offset_y: int = 0,
 ) -> None:
     # 如果世界坐标原点落在地图范围内，就在预览图上画一个红色十字标记
-    # 注意：预览图可能已经裁剪过，所以需要减掉裁剪偏移量
     pixel_x, pixel_y = world_to_pixel(
         yaml_meta["origin_x"],
         yaml_meta["origin_y"],
@@ -203,25 +202,6 @@ def extract_primary_region_mask(known_mask: np.ndarray) -> np.ndarray:
     return ndimage.binary_dilation(primary_region, structure=np.ones((dilate_size, dilate_size), dtype=bool))
 
 
-def compute_crop_box(primary_region_mask: np.ndarray, width: int, height: int) -> tuple[int, int, int, int]:
-    coords = np.argwhere(primary_region_mask)
-    if coords.size == 0:
-        return 0, 0, width, height
-
-    top = int(coords[:, 0].min())
-    bottom = int(coords[:, 0].max()) + 1
-    left = int(coords[:, 1].min())
-    right = int(coords[:, 1].max()) + 1
-
-    padding = max(30, min(width, height) // 35)
-    return (
-        max(0, left - padding),
-        max(0, top - padding),
-        min(width, right + padding),
-        min(height, bottom + padding),
-    )
-
-
 def generate_preview_and_dimensions(pgm_path: Path, preview_path: Path, yaml_meta: dict[str, float]) -> dict[str, int]:
     # 读取 .pgm 地图文件，并生成一张更适合人眼查看的 PNG 预览图
     # 这里不再简单保留灰度，而是结合 YAML 里的阈值，把地图语义分成：
@@ -251,7 +231,6 @@ def generate_preview_and_dimensions(pgm_path: Path, preview_path: Path, yaml_met
             unknown_mask = ~(occupied_mask | free_mask)
             known_mask = free_mask | occupied_mask
             primary_region_mask = extract_primary_region_mask(known_mask)
-            crop_left, crop_top, crop_right, crop_bottom = compute_crop_box(primary_region_mask, width, height)
 
             # 做一张 RGB 彩色预览图，让三类区域更容易区分：
             # 可通行区域：浅米白
@@ -265,24 +244,21 @@ def generate_preview_and_dimensions(pgm_path: Path, preview_path: Path, yaml_met
             # 主区域外的颜色统一收敛成更轻的背景色，弱化外围噪声
             color_preview[~primary_region_mask] = (233, 238, 241)
 
-            cropped_preview = color_preview[crop_top:crop_bottom, crop_left:crop_right]
-            preview_image = Image.fromarray(cropped_preview, mode="RGB")
+            preview_image = Image.fromarray(color_preview, mode="RGB")
             add_origin_marker(
                 preview_image,
                 yaml_meta,
                 original_width=width,
                 original_height=height,
-                offset_x=crop_left,
-                offset_y=crop_top,
             )
             preview_image.save(preview_path, format="PNG")
             return {
                 "width": width,
                 "height": height,
-                "preview_width": crop_right - crop_left,
-                "preview_height": crop_bottom - crop_top,
-                "preview_offset_x": crop_left,
-                "preview_offset_y": crop_top,
+                "preview_width": width,
+                "preview_height": height,
+                "preview_offset_x": 0,
+                "preview_offset_y": 0,
             }
     except (UnidentifiedImageError, OSError, ValueError) as exc:
         raise HTTPException(

@@ -759,8 +759,8 @@
                 ["原图高度", data.height],
                 ["预览宽度", data.preview_width],
                 ["预览高度", data.preview_height],
-                ["裁剪偏移 X", data.preview_offset_x],
-                ["裁剪偏移 Y", data.preview_offset_y],
+                ["预览偏移 X", data.preview_offset_x],
+                ["预览偏移 Y", data.preview_offset_y],
                 ["创建时间", data.created_at]
             ];
 
@@ -943,10 +943,8 @@
         function mapPixelToWorld(mapInfo, pixelX, pixelY) {
             const resolution = Number(mapInfo.resolution);
             const yaw = Number(mapInfo.origin_yaw || 0);
-            const originalPixelX = pixelX + Number(mapInfo.preview_offset_x || 0);
-            const originalPixelY = pixelY + Number(mapInfo.preview_offset_y || 0);
-            const localX = originalPixelX * resolution;
-            const localY = (Number(mapInfo.height) - originalPixelY) * resolution;
+            const localX = pixelX * resolution;
+            const localY = (Number(mapInfo.height) - pixelY) * resolution;
 
             const cosYaw = Math.cos(yaw);
             const sinYaw = Math.sin(yaw);
@@ -968,12 +966,9 @@
             const localX = deltaX * cosYaw + deltaY * sinYaw;
             const localY = -deltaX * sinYaw + deltaY * cosYaw;
 
-            const originalPixelX = localX / resolution;
-            const originalPixelY = Number(mapInfo.height) - localY / resolution;
-
             return {
-                x: originalPixelX - Number(mapInfo.preview_offset_x || 0),
-                y: originalPixelY - Number(mapInfo.preview_offset_y || 0)
+                x: localX / resolution,
+                y: Number(mapInfo.height) - localY / resolution
             };
         }
 

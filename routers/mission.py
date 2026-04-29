@@ -32,8 +32,8 @@ async def dispatch_mission(request: MissionCreateRequest, db: AsyncSession = Dep
         raise HTTPException(status_code=400, detail=block_reason)
 
     # 2. 异步创建路径记录
-    # model_dump 将 Pydantic 列表转为 Python 列表，以便存入 JSON 字段
-    waypoints_data = [[float(p.lat), float(p.lng)] for p in request.waypoints]
+    # 前端字段沿用 lng/lat 命名，但后端路径统一存 [x, y]，即 [lng, lat]。
+    waypoints_data = [[float(p.lng), float(p.lat)] for p in request.waypoints]
     
     new_path = Path(
         name=f"{request.name}_Path", 

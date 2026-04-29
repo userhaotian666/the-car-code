@@ -197,13 +197,15 @@ def _normalize_mission_report_payload(topic: str, payload: dict[str, Any]) -> di
 
 def _map_reported_task_status_to_task_status(task_status: int, is_scheduled: bool) -> TaskStatus | None:
     """把车端上报的任务状态码映射成后端 TaskStatus。"""
-    if task_status == 0:
-        return TaskStatus.SCHEDULED if is_scheduled else TaskStatus.PENDING
-    if task_status == 1:
-        return TaskStatus.RUNNING
-    if task_status == 2:
-        return TaskStatus.COMPLETED
-    return None
+    status_map = {
+        0: TaskStatus.SCHEDULED if is_scheduled else TaskStatus.PENDING,
+        1: TaskStatus.RUNNING,
+        2: TaskStatus.COMPLETED,
+        3: TaskStatus.PAUSED,
+        4: TaskStatus.CANCELLED,
+        5: TaskStatus.FAILED,
+    }
+    return status_map.get(task_status)
 
 
 def _topic_kind(topic: str) -> str:
@@ -374,7 +376,11 @@ async def process_mission_report(topic: str, payload: dict[str, Any]) -> None:
             if task.status != target_task_status:
                 task.status = target_task_status
 
-            if target_task_status == TaskStatus.COMPLETED:
+            if target_task_status in {
+                TaskStatus.COMPLETED,
+                TaskStatus.CANCELLED,
+                TaskStatus.FAILED,
+            }:
                 task.finished_at = normalized["reported_at"]
             else:
                 task.finished_at = None

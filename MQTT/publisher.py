@@ -63,13 +63,13 @@ def _build_path_publish_payload(
 def _build_task_command_publish_payload(
     car_ip: str,
     task_id: int,
-    task_acition: int,
-    recall: str = "",
-    all_pause: str = "",
+    task_action: int,
+    recall: Any = "",
+    all_pause: Any = "",
 ) -> tuple[str, dict[str, Any], str]:
     """构造“任务控制命令”消息。
 
-    `task_acition` 是车端协议里的原始字段名，这里保持不改，
+    `task_action` 是车端协议里的原始字段名，这里保持不改，
     避免后端和小车协议字段不一致。
     """
     timestamp = int(datetime.now().timestamp())
@@ -82,7 +82,7 @@ def _build_task_command_publish_payload(
         "car_ip": str(car_ip),
         "data": {
             "task_id": task_id,
-            "task_acition": task_acition,
+            "task_action": task_action,
             "recall": recall,
             "all_pause": all_pause,
         },
@@ -143,18 +143,18 @@ async def publish_path_to_car(
 async def publish_task_command_to_car(
     car_ip: str,
     task_id: int,
-    task_acition: int,
-    recall: str = "",
-    all_pause: str = "",
+    task_action: int,
+    recall: Any = "",
+    all_pause: Any = "",
 ) -> dict[str, Any]:
     """向指定小车下发任务控制命令。
 
-    适用于开始、暂停、继续任务等动作。
+    适用于开始、暂停、继续、一键召回等动作。
     """
     topic, payload, msg_id = _build_task_command_publish_payload(
         car_ip=car_ip,
         task_id=task_id,
-        task_acition=task_acition,
+        task_action=task_action,
         recall=recall,
         all_pause=all_pause,
     )
@@ -165,7 +165,7 @@ async def publish_task_command_to_car(
         "📤 已下发任务控制命令: "
         f"car_ip={car_ip}, "
         f"task_id={task_id}, "
-        f"task_acition={task_acition}, "
+        f"task_action={task_action}, "
         f"topic={topic}, "
         f"msg_id={msg_id}"
     )

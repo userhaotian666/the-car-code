@@ -44,6 +44,16 @@ def _make_db(*results):
     return db
 
 
+def _build_mission_report_payload(msg_id: str, task_status: int, timestamp: int = 1710000000):
+    return {
+        "msg_id": msg_id,
+        "timestamp": timestamp,
+        "car_id": "car-alpha",
+        "task_id": 12,
+        "task_status": task_status,
+    }
+
+
 class MqttReceiverTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         receiver._recent_msg_ids.clear()
@@ -74,55 +84,125 @@ class MqttReceiverTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(history.work_status, 5)
         db.commit.assert_awaited_once()
 
-    async def test_process_mission_report_updates_scheduled_task_back_to_scheduled(self):
+    async def _assert_mission_report_status(
+        self,
+        reported_status: int,
+        expected_status: TaskStatus,
+        *,
+        is_scheduled: bool = False,
+        initial_finished_at: datetime | None = datetime(2024, 1, 1, 0, 0, 0),
+        expected_finished_at: datetime | None = None,
+        msg_id: str | None = None,
+        timestamp: int = 1710000000,
+    ):
         car = SimpleNamespace(id=7, ip_address="10.168.1.100", current_task=None)
         task = SimpleNamespace(
             id=12,
             status=TaskStatus.RUNNING,
-            is_scheduled=True,
-            finished_at=datetime(2024, 1, 1, 0, 0, 0),
+            is_scheduled=is_scheduled,
+            finished_at=initial_finished_at,
             executor=None,
         )
         db = _make_db(car, task)
-        payload = {
-            "msg_id": "report-1",
-            "timestamp": 1710000000,
-            "car_id": "car-alpha",
-            "task_id": 12,
-            "task_status": 0,
-        }
+        payload = _build_mission_report_payload(
+            msg_id or f"report-{reported_status}",
+            reported_status,
+            timestamp,
+        )
 
         with patch("MQTT.receiver.AsyncSessionLocal", return_value=_FakeSessionContext(db)):
             await receiver.process_mission_report("car/10.168.1.100/task/report", payload)
 
-        self.assertEqual(task.status, TaskStatus.SCHEDULED)
-        self.assertIsNone(task.finished_at)
+        self.assertEqual(task.status, expected_status)
+        self.assertEqual(task.finished_at, expected_finished_at)
         db.commit.assert_awaited_once()
 
+    async def test_process_mission_report_maps_not_started_to_pending_for_normal_task(self):
+        await self._assert_mission_report_status(
+            0,
+            TaskStatus.PENDING,
+            is_scheduled=False,
+            expected_finished_at=None,
+            msg_id="report-pending",
+        )
+
+    async def test_process_mission_report_maps_not_started_to_scheduled_for_scheduled_task(self):
+        await self._assert_mission_report_status(
+            0,
+            TaskStatus.SCHEDULED,
+            is_scheduled=True,
+            expected_finished_at=None,
+            msg_id="report-scheduled",
+        )
+
+    async def test_process_mission_report_maps_running_status(self):
+        await self._assert_mission_report_status(
+            1,
+            TaskStatus.RUNNING,
+            expected_finished_at=None,
+            msg_id="report-running",
+        )
+
     async def test_process_mission_report_marks_task_completed_with_reported_time(self):
+        reported_at = datetime.fromtimestamp(1710000100)
+        await self._assert_mission_report_status(
+            2,
+            TaskStatus.COMPLETED,
+            initial_finished_at=None,
+            expected_finished_at=reported_at,
+            msg_id="report-completed",
+            timestamp=1710000100,
+        )
+
+    async def test_process_mission_report_maps_paused_status_without_finished_time(self):
+        await self._assert_mission_report_status(
+            3,
+            TaskStatus.PAUSED,
+            expected_finished_at=None,
+            msg_id="report-paused",
+        )
+
+    async def test_process_mission_report_maps_cancelled_status_with_reported_time(self):
+        reported_at = datetime.fromtimestamp(1710000200)
+        await self._assert_mission_report_status(
+            4,
+            TaskStatus.CANCELLED,
+            initial_finished_at=None,
+            expected_finished_at=reported_at,
+            msg_id="report-cancelled",
+            timestamp=1710000200,
+        )
+
+    async def test_process_mission_report_maps_failed_status_with_reported_time(self):
+        reported_at = datetime.fromtimestamp(1710000300)
+        await self._assert_mission_report_status(
+            5,
+            TaskStatus.FAILED,
+            initial_finished_at=None,
+            expected_finished_at=reported_at,
+            msg_id="report-failed",
+            timestamp=1710000300,
+        )
+
+    async def test_process_mission_report_ignores_invalid_task_status_and_allows_retry(self):
         car = SimpleNamespace(id=7, ip_address="10.168.1.100", current_task=None)
         task = SimpleNamespace(
             id=12,
             status=TaskStatus.RUNNING,
             is_scheduled=False,
-            finished_at=None,
+            finished_at=datetime(2024, 1, 1, 0, 0, 0),
             executor=None,
         )
         db = _make_db(car, task)
-        payload = {
-            "msg_id": "report-2",
-            "timestamp": 1710000100,
-            "car_id": "car-alpha",
-            "task_id": 12,
-            "task_status": 2,
-        }
+        payload = _build_mission_report_payload("report-invalid", 99)
 
         with patch("MQTT.receiver.AsyncSessionLocal", return_value=_FakeSessionContext(db)):
             await receiver.process_mission_report("car/10.168.1.100/task/report", payload)
 
-        self.assertEqual(task.status, TaskStatus.COMPLETED)
-        self.assertEqual(task.finished_at, datetime.fromtimestamp(1710000100))
-        db.commit.assert_awaited_once()
+        self.assertEqual(task.status, TaskStatus.RUNNING)
+        self.assertEqual(task.finished_at, datetime(2024, 1, 1, 0, 0, 0))
+        db.commit.assert_not_awaited()
+        self.assertNotIn("report-invalid", receiver._recent_msg_ids)
 
     async def test_dispatch_mqtt_message_routes_by_topic(self):
         with patch("MQTT.receiver.process_car_data", new=AsyncMock()) as process_car_data, patch(

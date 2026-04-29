@@ -93,7 +93,7 @@ def _require_task_executor(task: Optional[Task], action_text: str) -> Task:
 async def _publish_task_command(
     task: Task,
     command_action: str,
-    task_acition: int,
+    task_action: int,
 ) -> dict:
     executor = task.executor
     if executor is None:
@@ -107,7 +107,7 @@ async def _publish_task_command(
         return await publish_task_command_to_car(
             car_ip=car_ip,
             task_id=task.id,
-            task_acition=task_acition,
+            task_action=task_action,
             recall="",
             all_pause="",
         )
@@ -409,7 +409,7 @@ async def start_task(task_id: int, db: AsyncSession = Depends(get_db)):
     mqtt_result = await _publish_task_command(
         task=task,
         command_action="start",
-        task_acition=TASK_COMMAND_ACTION_START,
+        task_action=TASK_COMMAND_ACTION_START,
     )
 
     return _build_task_command_success_response(
@@ -435,7 +435,7 @@ async def pause_task(task_id: int, db: AsyncSession = Depends(get_db)):
     mqtt_result = await _publish_task_command(
         task=task,
         command_action="pause",
-        task_acition=TASK_COMMAND_ACTION_PAUSE,
+        task_action=TASK_COMMAND_ACTION_PAUSE,
     )
 
     return _build_task_command_success_response(
@@ -460,7 +460,7 @@ async def resume_task(task_id: int, db: AsyncSession = Depends(get_db)):
     mqtt_result = await _publish_task_command(
         task=task,
         command_action="resume",
-        task_acition=TASK_COMMAND_ACTION_RESUME,
+        task_action=TASK_COMMAND_ACTION_RESUME,
     )
 
     return _build_task_command_success_response(

@@ -1,5 +1,6 @@
 import unittest
 from types import SimpleNamespace
+from typing import Any, cast
 from unittest.mock import AsyncMock, patch
 
 from fastapi import HTTPException
@@ -66,7 +67,7 @@ class TaskCommandPublisherTests(unittest.TestCase):
         topic, payload, msg_id = _build_task_command_publish_payload(
             car_ip="192.168.1.20",
             task_id=12,
-            task_acition=2,
+            task_action=2,
         )
 
         self.assertEqual(topic, "car/192.168.1.20/task/cmd")
@@ -74,7 +75,7 @@ class TaskCommandPublisherTests(unittest.TestCase):
         self.assertEqual(payload["car_ip"], "192.168.1.20")
         self.assertIsInstance(payload["timestamp"], int)
         self.assertEqual(payload["data"]["task_id"], 12)
-        self.assertEqual(payload["data"]["task_acition"], 2)
+        self.assertEqual(payload["data"]["task_action"], 2)
         self.assertEqual(payload["data"]["recall"], "")
         self.assertEqual(payload["data"]["all_pause"], "")
 
@@ -131,7 +132,7 @@ class TaskControlRouteTests(unittest.IsolatedAsyncioTestCase):
             "routers.task.publish_task_command_to_car",
             new=AsyncMock(return_value={"topic": "car/10.168.1.100/task/cmd", "msg_id": "msg-1"}),
         ) as publish_mock:
-            result = await start_task(1, db=db)
+            result = cast(dict[str, Any], await start_task(1, db=db))
 
         self.assertTrue(result["mqtt_sent"])
         self.assertEqual(result["command_action"], "start")
@@ -139,7 +140,7 @@ class TaskControlRouteTests(unittest.IsolatedAsyncioTestCase):
         publish_mock.assert_awaited_once_with(
             car_ip="10.168.1.100",
             task_id=1,
-            task_acition=0,
+            task_action=0,
             recall="",
             all_pause="",
         )
@@ -151,14 +152,14 @@ class TaskControlRouteTests(unittest.IsolatedAsyncioTestCase):
             "routers.task.publish_task_command_to_car",
             new=AsyncMock(return_value={"topic": "car/10.168.1.100/task/cmd", "msg_id": "msg-2"}),
         ) as publish_mock:
-            result = await pause_task(1, db=db)
+            result = cast(dict[str, Any], await pause_task(1, db=db))
 
         self.assertTrue(result["mqtt_sent"])
         self.assertEqual(result["command_action"], "pause")
         publish_mock.assert_awaited_once_with(
             car_ip="10.168.1.100",
             task_id=1,
-            task_acition=1,
+            task_action=1,
             recall="",
             all_pause="",
         )
@@ -170,14 +171,14 @@ class TaskControlRouteTests(unittest.IsolatedAsyncioTestCase):
             "routers.task.publish_task_command_to_car",
             new=AsyncMock(return_value={"topic": "car/10.168.1.100/task/cmd", "msg_id": "msg-3"}),
         ) as publish_mock:
-            result = await resume_task(1, db=db)
+            result = cast(dict[str, Any], await resume_task(1, db=db))
 
         self.assertTrue(result["mqtt_sent"])
         self.assertEqual(result["command_action"], "resume")
         publish_mock.assert_awaited_once_with(
             car_ip="10.168.1.100",
             task_id=1,
-            task_acition=2,
+            task_action=2,
             recall="",
             all_pause="",
         )
@@ -193,9 +194,10 @@ class TaskControlRouteTests(unittest.IsolatedAsyncioTestCase):
                 await start_task(1, db=db)
 
         self.assertEqual(ctx.exception.status_code, 502)
-        self.assertEqual(ctx.exception.detail["command_action"], "start")
-        self.assertFalse(ctx.exception.detail["mqtt_sent"])
-        self.assertEqual(ctx.exception.detail["mqtt_error"], "broker down")
+        detail = cast(dict[str, Any], ctx.exception.detail)
+        self.assertEqual(detail["command_action"], "start")
+        self.assertFalse(detail["mqtt_sent"])
+        self.assertEqual(detail["mqtt_error"], "broker down")
 
 
 if __name__ == "__main__":
