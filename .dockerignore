@@ -1,10 +1,14 @@
+.git
+.codex
+.vscode
 __pycache__/
 *.py[cod]
 *$py.class
-
 .DS_Store
-.env
-
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+.venv/
+venv/
+.env
+uploads/

@@ -1,0 +1,22 @@
+services:
+  backend:
+    build: .
+    container_name: car-backend
+    restart: unless-stopped
+    ports:
+      - "${APP_PORT:-8000}:8000"
+    environment:
+      SQLALCHEMY_DATABASE_URL: "${SQLALCHEMY_DATABASE_URL:?请先在 .env 中配置 SQLALCHEMY_DATABASE_URL}"
+      MQTT_BROKER: "${MQTT_BROKER:-broker.emqx.io}"
+      MQTT_PORT: "${MQTT_PORT:-1883}"
+      MQTT_USER: "${MQTT_USER:-hz_xulan}"
+      MQTT_PW: "${MQTT_PW:-xunlan123456}"
+      MQTT_TOPIC: "${MQTT_TOPIC:-car/+/status}"
+      MQTT_MISSION_REPORT_TOPIC: "${MQTT_MISSION_REPORT_TOPIC:-car/+/task/report}"
+      MQTT_PATH_TOPIC_TEMPLATE: "${MQTT_PATH_TOPIC_TEMPLATE:-car/{car_ip}/task/path}"
+      MQTT_TASK_CMD_TOPIC_TEMPLATE: "${MQTT_TASK_CMD_TOPIC_TEMPLATE:-car/{car_ip}/task/cmd}"
+      MQTT_VERSION: "${MQTT_VERSION:-1.0}"
+      MQTT_RECONNECT_DELAY: "${MQTT_RECONNECT_DELAY:-3}"
+      MQTT_RECENT_MSG_IDS: "${MQTT_RECENT_MSG_IDS:-1000}"
+    volumes:
+      - ./uploads:/app/uploads
