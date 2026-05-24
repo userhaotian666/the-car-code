@@ -6,6 +6,7 @@ from sqlalchemy.orm import DeclarativeBase
 SQLALCHEMY_DATABASE_URL = os.getenv(
     "SQLALCHEMY_DATABASE_URL",
     "mysql+aiomysql://root:Cqc114514!@192.168.1.101/Car_data",
+    #"mysql+aiomysql://root:xhtxht0715@localhost/data",
 )
 
 # 2. 创建异步引擎
