@@ -208,12 +208,59 @@ class MqttReceiverTests(unittest.IsolatedAsyncioTestCase):
         with patch("MQTT.receiver.process_car_data", new=AsyncMock()) as process_car_data, patch(
             "MQTT.receiver.process_mission_report",
             new=AsyncMock(),
-        ) as process_mission_report:
+        ) as process_mission_report, patch(
+            "MQTT.receiver.process_live_path",
+            new=AsyncMock(),
+        ) as process_live_path:
             await receiver.dispatch_mqtt_message("car/10.168.1.100/status", {})
             await receiver.dispatch_mqtt_message("car/10.168.1.100/task/report", {})
+            await receiver.dispatch_mqtt_message("car/10.168.1.100/task/live_path", {})
 
         process_car_data.assert_awaited_once_with("car/10.168.1.100/status", {})
         process_mission_report.assert_awaited_once_with("car/10.168.1.100/task/report", {})
+        process_live_path.assert_awaited_once_with("car/10.168.1.100/task/live_path", {})
+
+    async def test_process_live_path_normalizes_and_updates_state(self):
+        payload = {
+            "msg_id": "live-path-1",
+            "version": "1.0",
+            "timestamp": 1710000000,
+            "data": {
+                "task_id": 3,
+                "segment_index": 0,
+                "is_last": False,
+                "points": [[1, 2], {"x": "3.5", "y": "4.5"}],
+            },
+        }
+
+        with patch(
+            "MQTT.receiver.update_live_path_segment",
+            new=AsyncMock(return_value=({"full_points": [[1.0, 2.0], [3.5, 4.5]]}, True)),
+        ) as update_live_path_segment:
+            await receiver.process_live_path("car/10.168.1.100/task/live_path", payload)
+
+        update_live_path_segment.assert_awaited_once_with(
+            task_id=3,
+            car_ip="10.168.1.100",
+            segment_index=0,
+            is_last=False,
+            points=[[1.0, 2.0], [3.5, 4.5]],
+        )
+
+    async def test_process_live_path_ignores_invalid_payload_and_allows_retry(self):
+        payload = {
+            "msg_id": "live-path-invalid",
+            "data": {
+                "task_id": 3,
+                "segment_index": 0,
+            },
+        }
+
+        with patch("MQTT.receiver.update_live_path_segment", new=AsyncMock()) as update_live_path_segment:
+            await receiver.process_live_path("car/10.168.1.100/task/live_path", payload)
+
+        update_live_path_segment.assert_not_awaited()
+        self.assertNotIn("live-path-invalid", receiver._recent_msg_ids)
 
 
 if __name__ == "__main__":

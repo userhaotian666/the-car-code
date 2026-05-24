@@ -3,6 +3,7 @@
 这个模块负责监听车端发来的 MQTT 消息，并把它们拆成两条独立的数据流：
 1. `car/{car_ip}/status`：车辆基础状态与工作状态
 2. `car/{car_ip}/task/report`：任务执行状态
+3. `car/{car_ip}/task/live_path`：小车端规划后的实时路径分段
 
 这样可以避免把 `work_status` 错误地当成 `Task.status` 来使用。
 """
@@ -19,12 +20,14 @@ from sqlalchemy.orm import selectinload
 
 from car_status import is_valid_car_status
 from database import AsyncSessionLocal
+from live_path_state import update_live_path_segment
 from model import Car, CarHistory, Task, TaskStatus
 
 from .config import (
     MAX_RECENT_MSG_IDS,
     MQTT_BROKER,
     MQTT_CLIENT_ID,
+    MQTT_LIVE_PATH_TOPIC,
     MQTT_MISSION_REPORT_TOPIC,
     MQTT_PORT,
     MQTT_PW,
@@ -58,6 +61,17 @@ def _parse_float(value: Any) -> float | None:
         return float(value)
     except (TypeError, ValueError):
         return None
+
+
+def _parse_bool(value: Any) -> bool:
+    """尽量把外部输入转成 bool，缺失时按 False 处理。"""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "y", "on"}
+    return False
 
 
 def _parse_reported_at(timestamp: Any) -> datetime:
@@ -195,6 +209,76 @@ def _normalize_mission_report_payload(topic: str, payload: dict[str, Any]) -> di
     }
 
 
+def _normalize_live_path_points(raw_points: Any) -> list[list[float]]:
+    """把车端分段里的路径点统一整理成 [[x, y], ...]。"""
+    if not isinstance(raw_points, list) or not raw_points:
+        raise ValueError("live_path 缺少 points 或 points 为空")
+
+    normalized_points: list[list[float]] = []
+    for index, point in enumerate(raw_points, start=1):
+        if isinstance(point, (list, tuple)) and len(point) == 2:
+            x, y = point
+        elif isinstance(point, dict):
+            # 兼容前端/车端不同命名习惯：地图相对坐标用 x/y，也兼容旧 lng/lat。
+            x = point.get("x", point.get("lng"))
+            y = point.get("y", point.get("lat"))
+        else:
+            raise ValueError(f"live_path 点 #{index} 格式不正确，必须是 [x, y] 或 {{x, y}}")
+
+        if x is None or y is None:
+            raise ValueError(f"live_path 点 #{index} 缺少坐标")
+
+        parsed_x = _parse_float(x)
+        parsed_y = _parse_float(y)
+        if parsed_x is None or parsed_y is None:
+            raise ValueError(f"live_path 点 #{index} 的坐标不是有效数字")
+
+        normalized_points.append([parsed_x, parsed_y])
+
+    return normalized_points
+
+
+def _normalize_live_path_payload(topic: str, payload: dict[str, Any]) -> dict[str, Any]:
+    """把小车规划路径分段 topic 的原始 payload 归一化成内部统一结构。"""
+    # car_ip 优先从 topic 取，避免 payload 写错车号时路由到错误车辆。
+    topic_car_ip = _car_ip_from_topic(topic)
+    payload_car_ip = payload.get("car_ip", payload.get("device_id"))
+    car_ip = str(topic_car_ip or payload_car_ip or "").strip()
+    if not car_ip:
+        raise ValueError("live_path 消息缺少 car_ip，无法定位车辆")
+
+    if topic_car_ip and payload_car_ip and str(topic_car_ip) != str(payload_car_ip):
+        print(
+            f"⚠️ live_path topic 中的 car_ip({topic_car_ip}) 与 payload 中的 car_ip({payload_car_ip}) 不一致，优先使用 topic"
+        )
+
+    _validate_payload_version(payload)
+    data = _extract_data(payload)
+
+    # live_path 必须绑定任务，否则前端不知道应该把规划路径画到哪个任务上。
+    task_id = _parse_int(data.get("task_id", payload.get("task_id")))
+    if task_id is None:
+        raise ValueError("live_path 消息缺少 task_id")
+
+    segment_index = _parse_int(data.get("segment_index", payload.get("segment_index")))
+    if segment_index is None:
+        raise ValueError("live_path 消息缺少 segment_index")
+    if segment_index < 0:
+        raise ValueError("live_path segment_index 不能为负数")
+
+    # 推荐车端使用 points；way_points 是为了兼容原本路径下发协议里的字段名。
+    raw_points = data.get("points", data.get("way_points", payload.get("points", payload.get("way_points"))))
+
+    return {
+        "msg_id": str(payload.get("msg_id") or "").strip(),
+        "car_ip": car_ip,
+        "task_id": task_id,
+        "segment_index": segment_index,
+        "is_last": _parse_bool(data.get("is_last", payload.get("is_last"))),
+        "points": _normalize_live_path_points(raw_points),
+    }
+
+
 def _map_reported_task_status_to_task_status(task_status: int, is_scheduled: bool) -> TaskStatus | None:
     """把车端上报的任务状态码映射成后端 TaskStatus。"""
     status_map = {
@@ -210,6 +294,8 @@ def _map_reported_task_status_to_task_status(task_status: int, is_scheduled: boo
 
 def _topic_kind(topic: str) -> str:
     """根据 topic 后缀判断消息属于哪条业务链路。"""
+    if topic.endswith("/task/live_path"):
+        return "live_path"
     if topic.endswith("/task/report"):
         return "mission_report"
     if topic.endswith("/status"):
@@ -401,12 +487,67 @@ async def process_mission_report(topic: str, payload: dict[str, Any]) -> None:
             print(f"❌ 任务状态上报处理失败: {exc}")
 
 
+async def process_live_path(topic: str, payload: dict[str, Any]) -> None:
+    """处理小车端规划后的实时路径分段，并推送给订阅该任务的前端。"""
+    if not isinstance(payload, dict):
+        print(f"⚠️ 忽略非 JSON 对象 live_path: topic={topic}")
+        return
+
+    try:
+        normalized = _normalize_live_path_payload(topic, payload)
+    except ValueError as exc:
+        print(f"⚠️ live_path 消息格式不正确: {exc}")
+        return
+
+    msg_id = normalized["msg_id"]
+    if msg_id and not _remember_msg_id(msg_id):
+        # 消息级去重：同一条 MQTT 消息重复送达时，整个消息直接忽略。
+        print(f"↩️ 忽略重复 live_path 消息: {msg_id}")
+        return
+
+    try:
+        # 分段级去重和 WebSocket 广播都在 live_path_state 里完成。
+        update_message, updated = await update_live_path_segment(
+            task_id=normalized["task_id"],
+            car_ip=normalized["car_ip"],
+            segment_index=normalized["segment_index"],
+            is_last=normalized["is_last"],
+            points=normalized["points"],
+        )
+    except Exception as exc:
+        _forget_msg_id(msg_id)
+        print(f"❌ live_path 处理失败: {exc}")
+        return
+
+    if not updated:
+        # 分段级去重：有些车端可能换了 msg_id 重发同一个 segment_index。
+        print(
+            "↩️ 忽略重复 live_path 分段: "
+            f"car_ip={normalized['car_ip']}, task_id={normalized['task_id']}, "
+            f"segment_index={normalized['segment_index']}"
+        )
+        return
+
+    print(
+        "✅ 已接收 live_path 分段: "
+        f"car_ip={normalized['car_ip']}, "
+        f"task_id={normalized['task_id']}, "
+        f"segment_index={normalized['segment_index']}, "
+        f"points={len(normalized['points'])}, "
+        f"full_points={len(update_message['full_points'])}, "
+        f"is_last={normalized['is_last']}"
+    )
+
+
 async def dispatch_mqtt_message(topic: str, payload: dict[str, Any]) -> None:
     """MQTT 消息分发器。
 
     `mqtt_listener` 只负责收消息，这个函数负责把消息转交给对应业务处理器。
     """
     kind = _topic_kind(topic)
+    if kind == "live_path":
+        await process_live_path(topic, payload)
+        return
     if kind == "car_status":
         await process_car_data(topic, payload)
         return
@@ -432,11 +573,13 @@ async def mqtt_listener() -> None:
             ) as client:
                 await client.subscribe(MQTT_TOPIC)
                 await client.subscribe(MQTT_MISSION_REPORT_TOPIC)
+                await client.subscribe(MQTT_LIVE_PATH_TOPIC)
                 print(
                     "✅ MQTT 监听已启动: "
                     f"broker={MQTT_BROKER}:{MQTT_PORT}, "
                     f"status_topic={MQTT_TOPIC}, "
                     f"mission_report_topic={MQTT_MISSION_REPORT_TOPIC}, "
+                    f"live_path_topic={MQTT_LIVE_PATH_TOPIC}, "
                     f"client_id={MQTT_CLIENT_ID}"
                 )
 

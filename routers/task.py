@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi import APIRouter, Depends, HTTPException, status, Query, WebSocket, WebSocketDisconnect
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from sqlalchemy import select
@@ -12,6 +12,7 @@ from car_runtime import (
     get_unbind_block_reason,
 )
 from database import get_db
+from live_path_state import get_live_path_snapshot, subscribe_live_path, unsubscribe_live_path
 from model import Task, Path, Car, TaskStatus
 from schemas import TaskCreate, TaskRead
 from MQTT import publish_path_to_car, publish_task_command_to_car
@@ -586,6 +587,36 @@ async def get_task_status(task_id: int, db: AsyncSession = Depends(get_db)):
         # 建议加这一个字段，前端能区分是"普通未开始(0)"还是"定时未开始(1)"
         "is_scheduled": task.is_scheduled 
     }
+
+
+@router.websocket("/{task_id}/live_path/monitor")
+async def websocket_task_live_path_monitor(websocket: WebSocket, task_id: int):
+    print(f"🔌 [LivePath] 前端订阅任务规划路径: task_id={task_id}")
+    await websocket.accept()
+    await subscribe_live_path(task_id, websocket)
+
+    try:
+        # 前端刷新页面时可能已经错过了前几段 MQTT，所以连接后先补一份当前快照。
+        snapshot = await get_live_path_snapshot(task_id)
+        await websocket.send_json(snapshot)
+        print(
+            "📡 [LivePath] 已推送当前路径快照: "
+            f"task_id={task_id}, full_points={len(snapshot['full_points'])}"
+        )
+
+        while True:
+            # 这个 WebSocket 主要由后端推送；这里等待前端消息只是为了感知断开。
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        print(f"👋 [LivePath] 前端断开任务规划路径订阅: task_id={task_id}")
+    except Exception as exc:
+        print(f"❌ [LivePath] WebSocket 异常: task_id={task_id}, error={exc}")
+        try:
+            await websocket.close()
+        except Exception:
+            pass
+    finally:
+        await unsubscribe_live_path(task_id, websocket)
 
 # 11. 删除任务 (Delete)
 # ==========================================
